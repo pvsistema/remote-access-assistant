@@ -74,7 +74,7 @@ const RemoteScreen = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex flex-col bg-[#101114]">
+    <div className="fixed inset-0 top-[var(--pv-titlebar,0px)] z-[60] flex flex-col bg-[#101114]">
       <header className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#16181c] px-3 py-2 text-white">
         <button
           type="button"

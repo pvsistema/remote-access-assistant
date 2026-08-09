@@ -52,7 +52,7 @@ const ConsoleShell = ({
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-secondary">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-secondary">
       <header className="flex h-[52px] flex-none items-center gap-3 border-b border-border bg-background px-4">
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
           <Icon name="MonitorSmartphone" size={17} />
