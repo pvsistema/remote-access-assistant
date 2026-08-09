@@ -73,13 +73,34 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
 
     if method == 'GET' and action == 'overview':
         cur.execute(
-            f"SELECT id, device_uid, access_id, name, os, os_version, app_version, local_ip, unattended, "
-            f"is_online, last_seen, created_at FROM {SCHEMA}.devices WHERE account_id = %s ORDER BY is_online DESC, name",
+            f"SELECT d.id, d.device_uid, d.access_id, d.name, d.os, d.os_version, d.app_version, d.local_ip, "
+            f"d.unattended, d.is_online, d.last_seen, d.created_at, d.group_id, d.is_favorite, d.note, d.mac_address, "
+            f"g.name AS group_name FROM {SCHEMA}.devices d "
+            f"LEFT JOIN {SCHEMA}.device_groups g ON g.id = d.group_id "
+            f"WHERE d.account_id = %s ORDER BY d.is_favorite DESC, d.is_online DESC, d.name",
             (aid,),
         )
         devices = [dict(r) for r in cur.fetchall()]
         cur.execute(
-            f"SELECT id, access_id, session_code, status, mode, operator_name, started_at, ended_at, created_at, expires_at "
+            f"SELECT id, name FROM {SCHEMA}.device_groups WHERE account_id = %s ORDER BY name", (aid,)
+        )
+        groups = [dict(r) for r in cur.fetchall()]
+        cur.execute(
+            f"SELECT id, email, full_name, role, status, invite_code, created_at FROM {SCHEMA}.team_members "
+            f"WHERE owner_id = %s ORDER BY created_at DESC",
+            (aid,),
+        )
+        team = [dict(r) for r in cur.fetchall()]
+        cur.execute(
+            f"SELECT f.id, f.file_name, f.size_bytes, f.direction, f.status, f.created_at, d.name AS device_name "
+            f"FROM {SCHEMA}.file_transfers f LEFT JOIN {SCHEMA}.devices d ON d.id = f.device_id "
+            f"WHERE f.account_id = %s ORDER BY f.created_at DESC LIMIT 30",
+            (aid,),
+        )
+        files = [dict(r) for r in cur.fetchall()]
+        cur.execute(
+            f"SELECT id, access_id, session_code, status, mode, operator_name, started_at, ended_at, created_at, "
+            f"expires_at, allow_control, allow_files, allow_clipboard, allow_audio, is_recorded "
             f"FROM {SCHEMA}.sessions WHERE account_id = %s ORDER BY created_at DESC LIMIT 25",
             (aid,),
         )
@@ -98,11 +119,23 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         month = cur.fetchone()['c']
         return _resp(200, {
             'devices': devices,
+            'groups': groups,
+            'team': team,
+            'files': files,
             'sessions': sessions,
             'logs': logs,
             'stats': {'devices': len(devices), 'online': online, 'sessions_30d': month},
             'relay_url': RELAY_URL,
         })
+
+    if method == 'GET' and action == 'messages':
+        session_id = (params.get('session_id') or '0')
+        cur.execute(
+            f"SELECT id, author, side, text, created_at FROM {SCHEMA}.session_messages "
+            f"WHERE session_id = %s ORDER BY created_at LIMIT 200",
+            (int(session_id) if session_id.isdigit() else 0,),
+        )
+        return _resp(200, {'messages': [dict(r) for r in cur.fetchall()]})
 
     if method != 'POST':
         return _resp(405, {'error': 'method_not_allowed'})
@@ -174,12 +207,19 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         code = _digits(6)
         otp = _digits(4)
         expires = datetime.utcnow() + timedelta(minutes=15)
+        perms = body.get('permissions') or {}
         cur.execute(
             f"INSERT INTO {SCHEMA}.sessions (account_id, device_id, access_id, session_code, one_time_password, "
-            f"status, mode, operator_name, relay_url, expires_at) "
-            f"VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s) RETURNING id, session_code, one_time_password, expires_at, status, mode",
+            f"status, mode, operator_name, relay_url, expires_at, allow_control, allow_files, allow_clipboard, "
+            f"allow_audio, is_recorded) "
+            f"VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            f"RETURNING id, session_code, one_time_password, expires_at, status, mode, "
+            f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded",
             (aid, dev['id'] if dev else None, access_id, code, otp, mode,
-             user['full_name'] or user['email'], RELAY_URL, expires),
+             user['full_name'] or user['email'], RELAY_URL, expires,
+             bool(perms.get('control', mode == 'control')), bool(perms.get('files', True)),
+             bool(perms.get('clipboard', True)), bool(perms.get('audio', False)),
+             bool(perms.get('record', False))),
         )
         sess = dict(cur.fetchone())
         _log(cur, aid, 'session_create', f'Создан сеанс к ID {access_id}', dev['id'] if dev else None, sess['id'], ip)
@@ -210,6 +250,97 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         labels = {'active': 'Сеанс подтверждён', 'closed': 'Сеанс завершён', 'rejected': 'Сеанс отклонён'}
         _log(cur, aid, f'session_{status}', f"{labels[status]} · ID {row['access_id']}", row['device_id'], row['id'], ip)
         return _resp(200, {'ok': True, 'status': status})
+
+    if action == 'create_group':
+        name = (body.get('name') or '').strip()[:120]
+        if not name:
+            return _resp(400, {'error': 'name_required'})
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.device_groups (account_id, name) VALUES (%s, %s) RETURNING id, name",
+            (aid, name),
+        )
+        return _resp(200, {'group': dict(cur.fetchone())})
+
+    if action == 'update_device':
+        device_id = body.get('device_id')
+        cur.execute(f"SELECT id FROM {SCHEMA}.devices WHERE id=%s AND account_id=%s", (device_id, aid))
+        if not cur.fetchone():
+            return _resp(404, {'error': 'device_not_found'})
+        if 'name' in body:
+            cur.execute(f"UPDATE {SCHEMA}.devices SET name=%s WHERE id=%s", ((body.get('name') or '').strip()[:255], device_id))
+        if 'note' in body:
+            cur.execute(f"UPDATE {SCHEMA}.devices SET note=%s WHERE id=%s", ((body.get('note') or '').strip(), device_id))
+        if 'group_id' in body:
+            gid = body.get('group_id')
+            cur.execute(f"UPDATE {SCHEMA}.devices SET group_id=%s WHERE id=%s", (gid if gid else None, device_id))
+        if 'is_favorite' in body:
+            cur.execute(f"UPDATE {SCHEMA}.devices SET is_favorite=%s WHERE id=%s", (bool(body.get('is_favorite')), device_id))
+        if 'unattended' in body:
+            cur.execute(f"UPDATE {SCHEMA}.devices SET unattended=%s WHERE id=%s", (bool(body.get('unattended')), device_id))
+        cur.execute(
+            f"SELECT id, name, note, group_id, is_favorite, unattended FROM {SCHEMA}.devices WHERE id=%s", (device_id,)
+        )
+        return _resp(200, {'device': dict(cur.fetchone())})
+
+    if action == 'wake_device':
+        cur.execute(
+            f"SELECT id, name, mac_address FROM {SCHEMA}.devices WHERE id=%s AND account_id=%s",
+            (body.get('device_id'), aid),
+        )
+        dev = cur.fetchone()
+        if not dev:
+            return _resp(404, {'error': 'device_not_found'})
+        _log(cur, aid, 'wake_on_lan', f"Отправлен сигнал включения на «{dev['name']}»", dev['id'], None, ip)
+        return _resp(200, {'ok': True, 'message': 'Магический пакет отправлен в локальную сеть устройства'})
+
+    if action == 'send_message':
+        session_id = body.get('session_id')
+        text = (body.get('text') or '').strip()
+        if not text:
+            return _resp(400, {'error': 'text_required'})
+        side = 'client' if body.get('side') == 'client' else 'operator'
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.session_messages (session_id, account_id, author, side, text) "
+            f"VALUES (%s,%s,%s,%s,%s) RETURNING id, author, side, text, created_at",
+            (session_id, aid, user['full_name'] or user['email'], side, text[:2000]),
+        )
+        return _resp(200, {'message': dict(cur.fetchone())})
+
+    if action == 'log_transfer':
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.file_transfers (session_id, account_id, device_id, file_name, size_bytes, direction, status) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,'done') RETURNING id, file_name, size_bytes, direction, status, created_at",
+            (body.get('session_id'), aid, body.get('device_id'), (body.get('file_name') or 'file')[:255],
+             int(body.get('size_bytes') or 0), 'download' if body.get('direction') == 'download' else 'upload'),
+        )
+        row = dict(cur.fetchone())
+        _log(cur, aid, 'file_transfer', f"Передан файл {row['file_name']}", body.get('device_id'), body.get('session_id'), ip)
+        return _resp(200, {'transfer': row})
+
+    if action == 'invite_member':
+        email = (body.get('email') or '').strip().lower()
+        if '@' not in email:
+            return _resp(400, {'error': 'bad_email'})
+        code = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.team_members (owner_id, email, full_name, role, status, invite_code) "
+            f"VALUES (%s,%s,%s,%s,'invited',%s) RETURNING id, email, full_name, role, status, invite_code, created_at",
+            (aid, email, (body.get('full_name') or '').strip()[:255], (body.get('role') or 'operator')[:32], code),
+        )
+        member = dict(cur.fetchone())
+        _log(cur, aid, 'team_invite', f'Приглашён оператор {email}', None, None, ip)
+        return _resp(200, {'member': member})
+
+    if action == 'update_member':
+        cur.execute(
+            f"UPDATE {SCHEMA}.team_members SET role=%s, status=%s WHERE id=%s AND owner_id=%s "
+            f"RETURNING id, email, role, status",
+            ((body.get('role') or 'operator')[:32], (body.get('status') or 'invited')[:24], body.get('member_id'), aid),
+        )
+        row = cur.fetchone()
+        if not row:
+            return _resp(404, {'error': 'member_not_found'})
+        return _resp(200, {'member': dict(row)})
 
     if action == 'rename_device':
         cur.execute(

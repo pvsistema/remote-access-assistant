@@ -2,11 +2,13 @@ import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import type { User } from '@/lib/api';
 
-export type TabKey = 'devices' | 'connect' | 'log' | 'api';
+export type TabKey = 'devices' | 'connect' | 'files' | 'team' | 'log' | 'api';
 
 const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: 'devices', label: 'Устройства', icon: 'MonitorSmartphone' },
   { key: 'connect', label: 'Подключение', icon: 'PlugZap' },
+  { key: 'files', label: 'Файлы', icon: 'FolderSync' },
+  { key: 'team', label: 'Команда', icon: 'Users' },
   { key: 'log', label: 'Журнал', icon: 'ScrollText' },
   { key: 'api', label: 'API для C#', icon: 'Code2' },
 ];

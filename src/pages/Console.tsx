@@ -4,12 +4,17 @@ import Icon from '@/components/ui/icon';
 import ConsoleShell, { type TabKey } from '@/components/console/ConsoleShell';
 import DevicesTab from '@/components/console/DevicesTab';
 import ConnectTab from '@/components/console/ConnectTab';
+import FilesTab from '@/components/console/FilesTab';
+import TeamTab from '@/components/console/TeamTab';
 import LogTab from '@/components/console/LogTab';
 import ApiTab from '@/components/console/ApiTab';
 import { api, clearToken, getToken, type Overview, type User } from '@/lib/api';
 
 const empty: Overview = {
   devices: [],
+  groups: [],
+  team: [],
+  files: [],
   sessions: [],
   logs: [],
   stats: { devices: 0, online: 0, sessions_30d: 0 },
@@ -71,6 +76,7 @@ const Console = () => {
       {tab === 'devices' && (
         <DevicesTab
           devices={data.devices}
+          groups={data.groups}
           stats={data.stats}
           onRefresh={load}
           onConnect={(id) => {
@@ -79,7 +85,11 @@ const Console = () => {
           }}
         />
       )}
-      {tab === 'connect' && <ConnectTab presetId={presetId} sessions={data.sessions} onChanged={load} />}
+      {tab === 'connect' && (
+        <ConnectTab presetId={presetId} sessions={data.sessions} devices={data.devices} onChanged={load} />
+      )}
+      {tab === 'files' && <FilesTab files={data.files} />}
+      {tab === 'team' && <TeamTab team={data.team} onRefresh={load} />}
       {tab === 'log' && <LogTab logs={data.logs} />}
       {tab === 'api' && <ApiTab />}
     </ConsoleShell>

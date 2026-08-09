@@ -28,6 +28,49 @@ export type Device = {
   is_online: boolean;
   last_seen: string | null;
   created_at: string;
+  group_id: number | null;
+  group_name: string | null;
+  is_favorite: boolean;
+  note: string;
+  mac_address: string;
+};
+
+export type Group = { id: number; name: string };
+
+export type Member = {
+  id: number;
+  email: string;
+  full_name: string;
+  role: string;
+  status: string;
+  invite_code: string;
+  created_at: string;
+};
+
+export type Transfer = {
+  id: number;
+  file_name: string;
+  size_bytes: number;
+  direction: string;
+  status: string;
+  created_at: string;
+  device_name: string | null;
+};
+
+export type Message = {
+  id: number;
+  author: string;
+  side: string;
+  text: string;
+  created_at: string;
+};
+
+export type Permissions = {
+  control: boolean;
+  files: boolean;
+  clipboard: boolean;
+  audio: boolean;
+  record: boolean;
 };
 
 export type Session = {
@@ -44,6 +87,11 @@ export type Session = {
   one_time_password?: string;
   relay_url?: string;
   device_name?: string | null;
+  allow_control?: boolean;
+  allow_files?: boolean;
+  allow_clipboard?: boolean;
+  allow_audio?: boolean;
+  is_recorded?: boolean;
 };
 
 export type LogItem = {
@@ -56,6 +104,9 @@ export type LogItem = {
 
 export type Overview = {
   devices: Device[];
+  groups: Group[];
+  team: Member[];
+  files: Transfer[];
   sessions: Session[];
   logs: LogItem[];
   stats: { devices: number; online: number; sessions_30d: number };
@@ -89,10 +140,53 @@ export const api = {
     }),
   me: () => request<{ user: User }>(`${AUTH_URL}?action=me`),
   overview: () => request<Overview>(`${AGENT_URL}?action=overview`),
-  createSession: (access_id: string, mode: string) =>
+  createSession: (access_id: string, mode: string, permissions?: Permissions) =>
     request<{ session: Session }>(`${AGENT_URL}?action=create_session`, {
       method: 'POST',
-      body: JSON.stringify({ access_id, mode }),
+      body: JSON.stringify({ access_id, mode, permissions }),
+    }),
+  createGroup: (name: string) =>
+    request<{ group: Group }>(`${AGENT_URL}?action=create_group`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+  updateDevice: (device_id: number, patch: Record<string, unknown>) =>
+    request<{ device: Device }>(`${AGENT_URL}?action=update_device`, {
+      method: 'POST',
+      body: JSON.stringify({ device_id, ...patch }),
+    }),
+  wakeDevice: (device_id: number) =>
+    request<{ ok: boolean; message: string }>(`${AGENT_URL}?action=wake_device`, {
+      method: 'POST',
+      body: JSON.stringify({ device_id }),
+    }),
+  messages: (session_id: number) =>
+    request<{ messages: Message[] }>(`${AGENT_URL}?action=messages&session_id=${session_id}`),
+  sendMessage: (session_id: number, text: string, side: 'operator' | 'client' = 'operator') =>
+    request<{ message: Message }>(`${AGENT_URL}?action=send_message`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id, text, side }),
+    }),
+  logTransfer: (payload: {
+    session_id?: number | null;
+    device_id?: number | null;
+    file_name: string;
+    size_bytes: number;
+    direction: 'upload' | 'download';
+  }) =>
+    request<{ transfer: Transfer }>(`${AGENT_URL}?action=log_transfer`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  inviteMember: (email: string, full_name: string, role: string) =>
+    request<{ member: Member }>(`${AGENT_URL}?action=invite_member`, {
+      method: 'POST',
+      body: JSON.stringify({ email, full_name, role }),
+    }),
+  updateMember: (member_id: number, role: string, status: string) =>
+    request<{ member: Member }>(`${AGENT_URL}?action=update_member`, {
+      method: 'POST',
+      body: JSON.stringify({ member_id, role, status }),
     }),
   updateSession: (session_id: number, status: 'active' | 'closed' | 'rejected') =>
     request<{ ok: boolean }>(`${AGENT_URL}?action=update_session`, {

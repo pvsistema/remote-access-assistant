@@ -9,6 +9,11 @@ const endpoints = [
   ['POST', `${AGENT_URL}?action=create_session`, 'Создать сеанс: код, одноразовый пароль, адрес канала'],
   ['POST', `${AGENT_URL}?action=update_session`, 'Статус сеанса: active / closed / rejected'],
   ['POST', `${AGENT_URL}?action=set_offline`, 'Клиент закрывается — пометить устройство офлайн'],
+  ['POST', `${AGENT_URL}?action=send_message`, 'Сообщение в чат сеанса (сторона operator или client)'],
+  ['GET', `${AGENT_URL}?action=messages&session_id=1`, 'История чата по сеансу'],
+  ['POST', `${AGENT_URL}?action=log_transfer`, 'Отметить переданный файл в истории'],
+  ['POST', `${AGENT_URL}?action=update_device`, 'Имя, заметка, группа, избранное, режим без подтверждения'],
+  ['POST', `${AGENT_URL}?action=wake_device`, 'Wake-on-LAN: включить компьютер по сети'],
   ['GET', `${AGENT_URL}?action=overview`, 'Устройства, сеансы, журнал и сводка для консоли'],
 ];
 
