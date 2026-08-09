@@ -10,7 +10,9 @@ import TeamTab from '@/components/console/TeamTab';
 import LogTab from '@/components/console/LogTab';
 import ApiTab from '@/components/console/ApiTab';
 import RemoteScreen from '@/components/console/RemoteScreen';
+import { IncomingSessionPrompt, SharingBar } from '@/components/console/IncomingSessionPrompt';
 import { useMyDevice } from '@/hooks/useMyDevice';
+import { useIncomingSession } from '@/hooks/useIncomingSession';
 import { toast } from '@/hooks/use-toast';
 import { api, clearToken, getToken, type Overview, type Session, type User } from '@/lib/api';
 
@@ -62,6 +64,7 @@ const Console = () => {
   }, [load, navigate]);
 
   const { device: myDevice, password, refreshPassword } = useMyDevice(!loading, load);
+  const { incoming, sharing, accept, reject, stopSharing } = useIncomingSession(myDevice?.id);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -101,20 +104,32 @@ const Console = () => {
     );
   }
 
+  const overlays = (
+    <>
+      {incoming && <IncomingSessionPrompt session={incoming} onAccept={accept} onReject={reject} />}
+      {sharing && !incoming && <SharingBar onStop={stopSharing} />}
+    </>
+  );
+
   if (screen) {
     return (
-      <RemoteScreen
-        session={screen}
-        device={data.devices.find((d) => d.access_id === screen.access_id)}
-        onClose={() => {
-          setScreen(null);
-          load();
-        }}
-      />
+      <>
+        <RemoteScreen
+          session={screen}
+          device={data.devices.find((d) => d.access_id === screen.access_id)}
+          onClose={() => {
+            setScreen(null);
+            load();
+          }}
+        />
+        {overlays}
+      </>
     );
   }
 
   return (
+    <>
+    {overlays}
     <ConsoleShell
       user={user}
       tab={tab}
@@ -151,6 +166,7 @@ const Console = () => {
       {tab === 'log' && <LogTab logs={data.logs} />}
       {tab === 'api' && <ApiTab />}
     </ConsoleShell>
+    </>
   );
 };
 

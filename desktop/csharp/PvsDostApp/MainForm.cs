@@ -52,6 +52,7 @@ public sealed class MainForm : Form
         Controls.Add(_web);
 
         Load += async (_, _) => await InitWebViewAsync();
+        FormClosing += (_, _) => { _agent?.Dispose(); _agent = null; };
     }
 
     // Keep the maximized window inside the working area (so the taskbar stays visible).
@@ -178,6 +179,8 @@ public sealed class MainForm : Form
         core.Navigate($"https://{VirtualHost}/index.html");
     }
 
+    private RemoteAgent? _agent;
+
     private void HandleWindowCommand(string cmd)
     {
         if (InvokeRequired) { BeginInvoke(() => HandleWindowCommand(cmd)); return; }
@@ -199,6 +202,33 @@ public sealed class MainForm : Form
                 ReleaseCapture();
                 SendMessage(Handle, WM_NCLBUTTONDOWN, (IntPtr)HTCAPTION, IntPtr.Zero);
                 break;
+            default:
+                HandleAgentCommand(cmd);
+                break;
+        }
+    }
+
+    // Remote-side control: the web UI starts/stops desktop sharing for a session.
+    // Format: "agent:start:{sessionId}:{deviceUid}:{allowFiles}" | "agent:stop"
+    private void HandleAgentCommand(string cmd)
+    {
+        if (cmd == "agent:stop")
+        {
+            _agent?.Dispose();
+            _agent = null;
+            return;
+        }
+        if (cmd.StartsWith("agent:start:", StringComparison.Ordinal))
+        {
+            var parts = cmd.Split(':');
+            if (parts.Length < 4) return;
+            if (!int.TryParse(parts[2], out int sessionId)) return;
+            var deviceUid = parts[3];
+            bool allowFiles = parts.Length < 5 || parts[4] != "0";
+
+            _agent?.Dispose();
+            _agent = new RemoteAgent(sessionId, deviceUid, allowFiles);
+            _agent.Start();
         }
     }
 

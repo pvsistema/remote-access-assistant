@@ -1,0 +1,27 @@
+{
+  "tests": [
+    {
+      "name": "CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Без токена доступ запрещён",
+      "method": "GET",
+      "path": "/?action=frame&session_id=1",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Команда без токена запрещена",
+      "method": "POST",
+      "path": "/?action=command",
+      "body": {"session_id": 1, "kind": "mouse"},
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

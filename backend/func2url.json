@@ -1,4 +1,5 @@
 {
+  "remote-stream": "https://functions.poehali.dev/db97b202-938b-4e3c-bee5-4e64927b6717",
   "agent-api": "https://functions.poehali.dev/71f9d96f-2470-4e7e-b343-63fbb92271f6",
   "auth": "https://functions.poehali.dev/b3762411-99d5-494c-8713-a885caa529ef"
 }

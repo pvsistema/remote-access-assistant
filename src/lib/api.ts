@@ -1,5 +1,6 @@
 export const AUTH_URL = 'https://functions.poehali.dev/b3762411-99d5-494c-8713-a885caa529ef';
 export const AGENT_URL = 'https://functions.poehali.dev/71f9d96f-2470-4e7e-b343-63fbb92271f6';
+export const STREAM_URL = 'https://functions.poehali.dev/db97b202-938b-4e3c-bee5-4e64927b6717';
 
 const TOKEN_KEY = 'pv_token';
 
@@ -208,6 +209,45 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ device_uid }),
     }),
+
+  // --- Remote desktop stream (operator side) ---
+  frame: (session_id: number, since: number) =>
+    request<{ frame: Frame | null; seq: number; unchanged?: boolean }>(
+      `${STREAM_URL}?action=frame&session_id=${session_id}&since=${since}`,
+    ),
+  command: (session_id: number, kind: string, payload: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`${STREAM_URL}?action=command`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id, kind, payload }),
+    }),
+  commandsBatch: (session_id: number, items: { kind: string; payload: Record<string, unknown> }[]) =>
+    request<{ ok: boolean; saved: number }>(`${STREAM_URL}?action=commands_batch`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id, items }),
+    }),
+  clipboard: (session_id: number, since: number) =>
+    request<{ clipboard: { side: string; text_value: string; seq: number } | null; seq: number }>(
+      `${STREAM_URL}?action=clipboard&session_id=${session_id}&since=${since}`,
+    ),
+  setClipboard: (session_id: number, text: string) =>
+    request<{ ok: boolean; seq: number }>(`${STREAM_URL}?action=set_clipboard`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id, text, side: 'operator' }),
+    }),
+  uploadFile: (session_id: number, file_name: string, data_b64: string) =>
+    request<{ ok: boolean; id: number; url: string }>(`${STREAM_URL}?action=upload_file`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id, file_name, data_b64 }),
+    }),
+};
+
+export type Frame = {
+  seq: number;
+  monitor: number;
+  width: number;
+  height: number;
+  image_b64: string;
+  updated_at: string;
 };
 
 export const ERRORS: Record<string, string> = {
