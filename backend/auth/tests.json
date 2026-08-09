@@ -1,0 +1,27 @@
+{
+  "tests": [
+    {
+      "name": "CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Me without token",
+      "method": "GET",
+      "path": "/?action=me",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unknown action",
+      "method": "POST",
+      "path": "/?action=wrong",
+      "body": {"email": "a@b.ru", "password": "123456"},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "string"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

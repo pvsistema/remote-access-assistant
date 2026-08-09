@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 
 const mainNav = [
@@ -108,12 +109,12 @@ const Header = () => {
             >
               8&nbsp;800&nbsp;500-68-57
             </a>
-            <a
-              href="#contacts"
+            <Link
+              to="/login"
               className="hidden items-center rounded-pill border border-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary transition-colors hover:bg-primary hover:text-primary-foreground lg:inline-flex"
             >
               Личный кабинет
-            </a>
+            </Link>
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
