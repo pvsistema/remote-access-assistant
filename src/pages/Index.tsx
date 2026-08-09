@@ -1,6 +1,5 @@
 import Header from '@/components/Header';
 import Hero from '@/components/Hero';
-import Steps from '@/components/Steps';
 import Features from '@/components/Features';
 import WebConsole from '@/components/WebConsole';
 import Download from '@/components/Download';
@@ -18,7 +17,6 @@ const Index = () => {
       <Header />
       <main>
         <Hero />
-        <Steps />
         <Features />
         <WebConsole />
         <Download />
