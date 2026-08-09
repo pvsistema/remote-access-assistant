@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Final executable name: PVSDOST.exe -->
+    <AssemblyName>PVSDOST</AssemblyName>
+    <RootNamespace>PvsDost</RootNamespace>
+    <ApplicationIcon>pvsdost.ico</ApplicationIcon>
+
+    <Product>ПВ-Система Доступ</Product>
+    <Company>ПВ-Система</Company>
+    <AssemblyTitle>ПВ-Система Доступ</AssemblyTitle>
+    <Version>1.0.0</Version>
+
+    <!-- self-contained single-file publish -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <SatelliteResourceLanguages>ru;en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2478.35" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="pvsdost.ico" Condition="Exists('pvsdost.ico')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

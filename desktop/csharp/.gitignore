@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+installer-out/
+.tools/
+build.log
+obfuscar.gen.xml
+PvsDostApp/pvsdost.ico
