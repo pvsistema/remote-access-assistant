@@ -10,7 +10,7 @@ const QuickConnect = ({ compact = false }: { compact?: boolean }) => {
   const go = (e: React.FormEvent) => {
     e.preventDefault();
     const clean = id.replace(/\D/g, '').slice(0, 9);
-    const target = getToken() ? '/console' : '/login';
+    const target = getToken() ? '/' : '/login';
     navigate(clean ? `${target}?id=${clean}` : target);
   };
 

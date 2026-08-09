@@ -4,6 +4,7 @@ import Icon from '@/components/ui/icon';
 import ConsoleShell, { type TabKey } from '@/components/console/ConsoleShell';
 import DevicesTab from '@/components/console/DevicesTab';
 import ConnectTab from '@/components/console/ConnectTab';
+import HomeTab from '@/components/console/HomeTab';
 import FilesTab from '@/components/console/FilesTab';
 import TeamTab from '@/components/console/TeamTab';
 import LogTab from '@/components/console/LogTab';
@@ -27,7 +28,7 @@ const Console = () => {
   const initialId = searchParams.get('id') || '';
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<Overview>(empty);
-  const [tab, setTab] = useState<TabKey>(initialId ? 'connect' : 'devices');
+  const [tab, setTab] = useState<TabKey>(initialId ? 'connect' : 'home');
   const [presetId, setPresetId] = useState(initialId);
   const [loading, setLoading] = useState(true);
 
@@ -73,6 +74,16 @@ const Console = () => {
 
   return (
     <ConsoleShell user={user} tab={tab} onTab={setTab} onLogout={logout}>
+      {tab === 'home' && (
+        <HomeTab
+          devices={data.devices}
+          onRefresh={load}
+          onConnect={(id) => {
+            setPresetId(id);
+            setTab('connect');
+          }}
+        />
+      )}
       {tab === 'devices' && (
         <DevicesTab
           devices={data.devices}

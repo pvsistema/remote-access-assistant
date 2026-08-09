@@ -2,9 +2,10 @@ import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import type { User } from '@/lib/api';
 
-export type TabKey = 'devices' | 'connect' | 'files' | 'team' | 'log' | 'api';
+export type TabKey = 'home' | 'devices' | 'connect' | 'files' | 'team' | 'log' | 'api';
 
 const tabs: { key: TabKey; label: string; icon: string }[] = [
+  { key: 'home', label: 'Главная', icon: 'House' },
   { key: 'devices', label: 'Устройства', icon: 'MonitorSmartphone' },
   { key: 'connect', label: 'Подключение', icon: 'PlugZap' },
   { key: 'files', label: 'Файлы', icon: 'FolderSync' },
@@ -29,16 +30,24 @@ const ConsoleShell = ({
   <div className="min-h-screen bg-secondary">
     <header className="sticky top-0 z-40 border-b border-border bg-background">
       <div className="pv-container flex h-[74px] items-center gap-6">
-        <Link to="/" className="flex items-center gap-3 text-foreground no-underline">
+        <span className="flex items-center gap-3 text-foreground">
           <span className="grid h-10 w-10 place-items-center rounded-[13px] bg-primary text-primary-foreground">
             <Icon name="MonitorSmartphone" size={20} />
           </span>
           <span className="hidden font-head text-[1.15rem] font-bold -tracking-[0.025em] sm:block">
             ПВ-СИСТЕМА <span className="font-normal text-muted-foreground">Доступ</span>
           </span>
+        </span>
+
+        <Link
+          to="/help"
+          className="ml-auto inline-flex items-center gap-2 rounded-pill border border-border px-5 py-3 text-[0.9rem] font-semibold leading-none text-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Icon name="CircleHelp" size={17} />
+          <span className="hidden sm:inline">Помощь</span>
         </Link>
 
-        <span className="ml-auto hidden text-right text-[0.85rem] leading-tight md:block">
+        <span className="hidden text-right text-[0.85rem] leading-tight md:block">
           <span className="block font-semibold text-foreground">{user?.full_name || user?.email}</span>
           <span className="block text-muted-foreground">{user?.company || 'Личный аккаунт'}</span>
         </span>

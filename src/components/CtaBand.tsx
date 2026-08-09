@@ -34,11 +34,11 @@ const CtaBand = () => {
                 Скачать бесплатно
               </a>
               <Link
-                to="/login"
+                to="/"
                 className="inline-flex items-center gap-2.5 rounded-pill border border-background/30 px-[30px] py-[17px] text-[0.95rem] font-semibold leading-none text-background transition-colors hover:bg-background hover:text-foreground"
               >
-                <Icon name="LayoutDashboard" size={18} />
-                Войти в веб-консоль
+                <Icon name="ArrowLeft" size={18} />
+                Вернуться в программу
               </Link>
             </div>
           </div>

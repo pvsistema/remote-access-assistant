@@ -111,10 +111,11 @@ const Header = () => {
               8&nbsp;800&nbsp;500-68-57
             </a>
             <Link
-              to="/login"
-              className="hidden items-center rounded-pill border border-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary transition-colors hover:bg-primary hover:text-primary-foreground lg:inline-flex"
+              to="/"
+              className="hidden items-center gap-2.5 rounded-pill border border-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary transition-colors hover:bg-primary hover:text-primary-foreground lg:inline-flex"
             >
-              Личный кабинет
+              <Icon name="ArrowLeft" size={17} />
+              Вернуться в программу
             </Link>
             <button
               type="button"
@@ -171,12 +172,12 @@ const Header = () => {
               </a>
             ))}
             <Link
-              to="/login"
+              to="/"
               onClick={() => setOpen(false)}
               className="mt-3 inline-flex items-center justify-center gap-2.5 rounded-pill bg-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary-foreground"
             >
-              <Icon name="LogIn" size={18} />
-              Личный кабинет
+              <Icon name="ArrowLeft" size={18} />
+              Вернуться в программу
             </Link>
             <a
               href="#download"

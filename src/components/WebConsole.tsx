@@ -43,11 +43,11 @@ const WebConsole = () => (
 
         <div className="mt-9 flex flex-wrap items-center gap-4">
           <Link
-            to="/login"
+            to="/"
             className="inline-flex items-center gap-2.5 rounded-pill bg-primary px-[30px] py-[17px] text-[0.95rem] font-semibold leading-none text-primary-foreground transition-colors hover:bg-destructive"
           >
-            <Icon name="LogIn" size={18} />
-            Открыть консоль
+            <Icon name="ArrowLeft" size={18} />
+            Вернуться в программу
           </Link>
           <Link
             to="/login"

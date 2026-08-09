@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from '@/components/ui/icon';
 import { toast } from '@/hooks/use-toast';
+import RemoteScreen from '@/components/console/RemoteScreen';
 import { api, ERRORS, type Device, type Message, type Permissions, type Session } from '@/lib/api';
 
 const modes = [
@@ -49,6 +50,7 @@ const ConnectTab = ({
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatText, setChatText] = useState('');
+  const [screen, setScreen] = useState<Session | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const device = devices.find((d) => d.access_id === accessId.replace(/\D/g, ''));
@@ -110,6 +112,20 @@ const ConnectTab = ({
     toast({ title: 'Файлы поставлены в очередь', description: `${files.length} файл(ов) отправляются на удалённый ПК` });
     onChanged();
   };
+
+  if (screen) {
+    return (
+      <RemoteScreen
+        session={screen}
+        device={devices.find((d) => d.access_id === screen.access_id)}
+        onClose={() => {
+          setScreen(null);
+          setActive(null);
+          onChanged();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
@@ -210,15 +226,16 @@ const ConnectTab = ({
               Канал: {active.relay_url} · действует 15 минут
             </p>
             <div className="mt-5 flex flex-wrap gap-2.5">
-              {active.status === 'pending' && (
-                <button
-                  type="button"
-                  onClick={() => update('active')}
-                  className="inline-flex items-center gap-2 rounded-pill bg-primary px-5 py-3 text-[0.88rem] font-semibold leading-none text-primary-foreground"
-                >
-                  <Icon name="Check" size={16} /> Подтвердить
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={async () => {
+                  if (active.status === 'pending') await update('active');
+                  setScreen({ ...active, status: 'active' });
+                }}
+                className="inline-flex items-center gap-2 rounded-pill bg-primary px-5 py-3 text-[0.88rem] font-semibold leading-none text-primary-foreground"
+              >
+                <Icon name="MonitorPlay" size={16} /> Открыть рабочий стол
+              </button>
               <button
                 type="button"
                 onClick={() => fileRef.current?.click()}
