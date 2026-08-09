@@ -9,7 +9,10 @@ import FilesTab from '@/components/console/FilesTab';
 import TeamTab from '@/components/console/TeamTab';
 import LogTab from '@/components/console/LogTab';
 import ApiTab from '@/components/console/ApiTab';
-import { api, clearToken, getToken, type Overview, type User } from '@/lib/api';
+import RemoteScreen from '@/components/console/RemoteScreen';
+import { useMyDevice } from '@/hooks/useMyDevice';
+import { toast } from '@/hooks/use-toast';
+import { api, clearToken, getToken, type Overview, type Session, type User } from '@/lib/api';
 
 const empty: Overview = {
   devices: [],
@@ -31,6 +34,7 @@ const Console = () => {
   const [tab, setTab] = useState<TabKey>(initialId ? 'connect' : 'home');
   const [presetId, setPresetId] = useState(initialId);
   const [loading, setLoading] = useState(true);
+  const [screen, setScreen] = useState<Session | null>(null);
 
   const logout = useCallback(() => {
     clearToken();
@@ -57,12 +61,37 @@ const Console = () => {
     load();
   }, [load, navigate]);
 
+  const { device: myDevice, password, refreshPassword } = useMyDevice(!loading, load);
+
   useEffect(() => {
     const id = setInterval(() => {
       if (getToken()) api.overview().then(setData).catch(() => undefined);
     }, 15000);
     return () => clearInterval(id);
   }, []);
+
+  const quickConnect = async (accessId: string, mode = 'control') => {
+    const clean = accessId.replace(/\D/g, '');
+    if (clean.length < 6) {
+      toast({ title: 'Введите ID', description: 'ID партнёра состоит из 9 цифр' });
+      return;
+    }
+    try {
+      const res = await api.createSession(clean, mode, {
+        control: mode === 'control',
+        files: true,
+        clipboard: true,
+        audio: false,
+        record: false,
+      });
+      await api.updateSession(res.session.id, 'active');
+      setScreen({ ...res.session, status: 'active', access_id: clean });
+      load();
+    } catch {
+      setPresetId(clean);
+      setTab('connect');
+    }
+  };
 
   if (loading) {
     return (
@@ -72,16 +101,37 @@ const Console = () => {
     );
   }
 
+  if (screen) {
+    return (
+      <RemoteScreen
+        session={screen}
+        device={data.devices.find((d) => d.access_id === screen.access_id)}
+        onClose={() => {
+          setScreen(null);
+          load();
+        }}
+      />
+    );
+  }
+
   return (
-    <ConsoleShell user={user} tab={tab} onTab={setTab} onLogout={logout}>
+    <ConsoleShell
+      user={user}
+      tab={tab}
+      onTab={setTab}
+      onLogout={logout}
+      myDevice={myDevice}
+      password={password}
+      onRefreshPassword={refreshPassword}
+      online={data.stats.online}
+    >
       {tab === 'home' && (
         <HomeTab
           devices={data.devices}
+          sessions={data.sessions}
+          myAccessId={myDevice?.access_id || ''}
           onRefresh={load}
-          onConnect={(id) => {
-            setPresetId(id);
-            setTab('connect');
-          }}
+          onConnect={quickConnect}
         />
       )}
       {tab === 'devices' && (
@@ -90,10 +140,7 @@ const Console = () => {
           groups={data.groups}
           stats={data.stats}
           onRefresh={load}
-          onConnect={(id) => {
-            setPresetId(id);
-            setTab('connect');
-          }}
+          onConnect={quickConnect}
         />
       )}
       {tab === 'connect' && (

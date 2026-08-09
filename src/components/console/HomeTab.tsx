@@ -1,216 +1,269 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Icon from '@/components/ui/icon';
-import { toast } from '@/hooks/use-toast';
-import { api, type Device } from '@/lib/api';
+import { api, type Device, type Session } from '@/lib/api';
 
-const UID_KEY = 'pv_device_uid';
+const filters = [
+  { key: 'recent', label: 'Последние сеансы' },
+  { key: 'fav', label: 'Избранное' },
+  { key: 'online', label: 'В сети' },
+  { key: 'book', label: 'Адресная книга' },
+];
 
-const getUid = () => {
-  let uid = localStorage.getItem(UID_KEY);
-  if (!uid) {
-    uid = `web-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-    localStorage.setItem(UID_KEY, uid);
-  }
-  return uid;
-};
-
-const browserName = () => {
-  const ua = navigator.userAgent;
-  if (ua.includes('Firefox')) return 'Firefox';
-  if (ua.includes('Edg')) return 'Edge';
-  if (ua.includes('Chrome')) return 'Chrome';
-  if (ua.includes('Safari')) return 'Safari';
-  return 'Браузер';
-};
-
-const osName = () => {
-  const ua = navigator.userAgent;
-  if (ua.includes('Windows')) return 'Windows';
-  if (ua.includes('Mac')) return 'macOS';
-  if (ua.includes('Android')) return 'Android';
-  if (ua.includes('Linux')) return 'Linux';
-  return 'ОС';
+const osIcon = (os: string) => {
+  const s = (os || '').toLowerCase();
+  if (s.includes('mac')) return 'Apple';
+  if (s.includes('linux') || s.includes('astra')) return 'Terminal';
+  if (s.includes('android')) return 'Smartphone';
+  return 'Monitor';
 };
 
 const HomeTab = ({
   devices,
+  sessions,
+  myAccessId,
   onConnect,
   onRefresh,
 }: {
   devices: Device[];
-  onConnect: (accessId: string) => void;
+  sessions: Session[];
+  myAccessId: string;
+  onConnect: (accessId: string, mode?: string) => void;
   onRefresh: () => void;
 }) => {
-  const [me, setMe] = useState<{ access_id: string; name: string } | null>(null);
-  const [password, setPassword] = useState('');
-  const [copied, setCopied] = useState('');
   const [partnerId, setPartnerId] = useState('');
+  const [filter, setFilter] = useState('recent');
+  const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [query, setQuery] = useState('');
+  const [menu, setMenu] = useState<number | null>(null);
+  const [modeOpen, setModeOpen] = useState(false);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('pv_device_pass') || String(Math.floor(1000 + Math.random() * 9000));
-    localStorage.setItem('pv_device_pass', saved);
-    setPassword(saved);
+  const others = devices.filter((d) => d.access_id !== myAccessId);
 
-    api
-      .registerDevice({
-        device_uid: getUid(),
-        name: `${browserName()} · ${osName()}`,
-        os: osName(),
-        os_version: browserName(),
-        app_version: 'web 1.0',
-        local_ip: '',
-        unattended: false,
-      })
-      .then((r) => {
-        setMe(r.device);
-        onRefresh();
-      })
-      .catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const list = useMemo(() => {
+    const recentIds = sessions.map((s) => s.access_id);
+    let base = others;
+    if (filter === 'fav') base = others.filter((d) => d.is_favorite);
+    if (filter === 'online') base = others.filter((d) => d.is_online);
+    if (filter === 'recent') {
+      const inRecent = others.filter((d) => recentIds.includes(d.access_id));
+      base = inRecent.length ? inRecent : others;
+    }
+    const q = query.trim().toLowerCase();
+    return q ? base.filter((d) => `${d.name} ${d.access_id} ${d.note}`.toLowerCase().includes(q)) : base;
+  }, [others, sessions, filter, query]);
 
-  const copy = (v: string, key: string) => {
-    navigator.clipboard?.writeText(v);
-    setCopied(key);
-    setTimeout(() => setCopied(''), 1600);
+  const toggleFav = async (d: Device) => {
+    await api.updateDevice(d.id, { is_favorite: !d.is_favorite });
+    setMenu(null);
+    onRefresh();
   };
 
-  const newPassword = () => {
-    const p = String(Math.floor(1000 + Math.random() * 9000));
-    localStorage.setItem('pv_device_pass', p);
-    setPassword(p);
-    toast({ title: 'Пароль обновлён', description: 'Старый одноразовый пароль больше не действует' });
-  };
-
-  const recent = devices.filter((d) => d.access_id !== me?.access_id).slice(0, 6);
+  const fmtId = (v: string) => v.replace(/(\d{3})(?=\d)/g, '$1 ');
 
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
-      <section className="rounded-[22px] border border-border bg-background p-7">
-        <span className="pv-eyebrow">Этот компьютер</span>
-        <h2 className="mt-3 text-[1.25rem] font-bold">Разрешить управление</h2>
-        <p className="mt-2 text-[0.93rem] text-muted-foreground">
-          Передайте эти данные специалисту — он подключится к вашему рабочему столу.
-        </p>
-
-        <div className="mt-6 flex flex-col gap-4">
-          <div className="flex items-center gap-4 rounded-2xl bg-secondary px-5 py-5">
-            <span className="flex-1">
-              <span className="block font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
-                Ваш ID
-              </span>
-              <span className="mt-1 block font-head text-[2rem] font-bold leading-none tracking-[0.08em]">
-                {me ? me.access_id.replace(/(\d{3})(?=\d)/g, '$1 ') : '— — —'}
-              </span>
-            </span>
-            <button
-              type="button"
-              onClick={() => me && copy(me.access_id, 'id')}
-              className="grid h-11 w-11 place-items-center rounded-xl border border-border bg-background text-foreground transition-colors hover:border-primary hover:text-primary"
-              aria-label="Скопировать ID"
-            >
-              <Icon name={copied === 'id' ? 'Check' : 'Copy'} size={18} />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4 rounded-2xl bg-secondary px-5 py-5">
-            <span className="flex-1">
-              <span className="block font-mono text-[0.72rem] uppercase tracking-[0.08em] text-muted-foreground">
-                Одноразовый пароль
-              </span>
-              <span className="mt-1 block font-head text-[2rem] font-bold leading-none tracking-[0.12em]">
-                {password}
-              </span>
-            </span>
-            <button
-              type="button"
-              onClick={newPassword}
-              className="grid h-11 w-11 place-items-center rounded-xl border border-border bg-background text-foreground transition-colors hover:border-primary hover:text-primary"
-              aria-label="Обновить пароль"
-            >
-              <Icon name="RefreshCw" size={18} />
-            </button>
-            <button
-              type="button"
-              onClick={() => copy(password, 'pass')}
-              className="grid h-11 w-11 place-items-center rounded-xl border border-border bg-background text-foreground transition-colors hover:border-primary hover:text-primary"
-              aria-label="Скопировать пароль"
-            >
-              <Icon name={copied === 'pass' ? 'Check' : 'Copy'} size={18} />
-            </button>
-          </div>
-        </div>
-
-        <p className="mt-5 flex items-start gap-2.5 text-[0.85rem] leading-[1.5] text-muted-foreground">
-          <Icon name="ShieldCheck" size={16} className="mt-0.5 flex-none text-primary" />
-          Соединение шифруется, пароль действует один сеанс. Никому не диктуйте эти данные по
-          просьбе из мессенджера или звонка от «банка».
-        </p>
-      </section>
-
-      <section className="rounded-[22px] border border-border bg-background p-7">
-        <span className="pv-eyebrow">Удалённый компьютер</span>
-        <h2 className="mt-3 text-[1.25rem] font-bold">Управлять другим ПК</h2>
-        <p className="mt-2 text-[0.93rem] text-muted-foreground">
-          Введите ID партнёра, чтобы открыть его рабочий стол.
-        </p>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            onConnect(partnerId.replace(/\D/g, ''));
-          }}
-          className="mt-6 flex flex-col gap-3"
-        >
-          <input
-            value={partnerId}
-            onChange={(e) => setPartnerId(e.target.value)}
-            inputMode="numeric"
-            placeholder="ID партнёра"
-            className="h-[64px] rounded-2xl border border-input bg-background px-5 font-mono text-[1.5rem] font-bold tracking-[0.12em] outline-none focus:border-primary"
-          />
+    <div className="flex flex-col gap-6">
+      <section className="max-w-[520px] rounded-2xl border border-border bg-background p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+        <h2 className="text-[1.15rem] font-bold leading-tight">Управление удалённым рабочим столом</h2>
+        <input
+          value={partnerId}
+          onChange={(e) => setPartnerId(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && onConnect(partnerId.replace(/\D/g, ''))}
+          inputMode="numeric"
+          placeholder="ID партнёра"
+          className="mt-4 h-[50px] w-full rounded-lg border border-input bg-background px-4 text-[1.15rem] outline-none focus:border-primary"
+        />
+        <div className="relative mt-4 flex justify-end gap-1.5">
           <button
-            type="submit"
-            className="inline-flex items-center justify-center gap-2.5 rounded-pill bg-primary px-8 py-[17px] text-[0.98rem] font-semibold leading-none text-primary-foreground transition-opacity hover:opacity-90"
+            type="button"
+            onClick={() => onConnect(partnerId.replace(/\D/g, ''))}
+            className="rounded-lg bg-primary px-6 py-2.5 text-[0.9rem] font-semibold text-primary-foreground transition-opacity hover:opacity-90"
           >
-            <Icon name="PlugZap" size={18} /> Подключиться
+            Подключиться
           </button>
-        </form>
-
-        <div className="mt-7">
-          <span className="text-[0.85rem] font-medium text-muted-foreground">Недавние</span>
-          {recent.length === 0 ? (
-            <p className="mt-3 text-[0.9rem] text-muted-foreground">
-              Здесь появятся компьютеры, к которым вы подключались.
-            </p>
-          ) : (
-            <ul className="mt-3 flex flex-col divide-y divide-border">
-              {recent.map((d) => (
-                <li key={d.id} className="flex items-center gap-3 py-3">
-                  <span
-                    className={`h-2.5 w-2.5 flex-none rounded-full ${
-                      d.is_online ? 'animate-pulse-dot bg-primary' : 'bg-muted-foreground/40'
-                    }`}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[0.93rem] font-semibold">{d.name}</span>
-                    <span className="block font-mono text-[0.78rem] text-muted-foreground">
-                      ID {d.access_id}
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onConnect(d.access_id)}
-                    className="rounded-pill border border-border px-4 py-2 text-[0.83rem] font-semibold transition-colors hover:border-primary hover:text-primary"
-                  >
-                    Открыть
-                  </button>
-                </li>
+          <button
+            type="button"
+            onClick={() => setModeOpen((o) => !o)}
+            className="grid h-[42px] w-[42px] place-items-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90"
+            aria-label="Режим подключения"
+          >
+            <Icon name="ChevronDown" size={17} />
+          </button>
+          {modeOpen && (
+            <div className="absolute right-0 top-[48px] z-20 w-[240px] overflow-hidden rounded-xl border border-border bg-background py-1 shadow-lg">
+              {[
+                ['control', 'Полное управление', 'MousePointerClick'],
+                ['view', 'Только просмотр', 'Eye'],
+                ['files', 'Передача файлов', 'FolderSync'],
+              ].map(([m, label, icon]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => {
+                    setModeOpen(false);
+                    onConnect(partnerId.replace(/\D/g, ''), m);
+                  }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[0.88rem] hover:bg-secondary"
+                >
+                  <Icon name={icon} size={16} className="text-muted-foreground" />
+                  {label}
+                </button>
               ))}
-            </ul>
+            </div>
           )}
         </div>
       </section>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {filters.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={`rounded-lg px-4 py-2 text-[0.9rem] transition-colors ${
+              filter === f.key
+                ? 'bg-background font-semibold text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+
+        <label className="ml-auto flex h-10 w-[220px] items-center gap-2 rounded-lg border border-border bg-background px-3">
+          <Icon name="Search" size={16} className="flex-none text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Поиск"
+            className="w-full bg-transparent text-[0.88rem] outline-none"
+          />
+          {query && (
+            <button type="button" onClick={() => setQuery('')} className="text-muted-foreground">
+              <Icon name="CircleX" size={15} />
+            </button>
+          )}
+        </label>
+        <span className="flex overflow-hidden rounded-lg border border-border">
+          {(['grid', 'list'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`grid h-10 w-10 place-items-center transition-colors ${
+                view === v ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground'
+              }`}
+              aria-label={v === 'grid' ? 'Плитками' : 'Списком'}
+            >
+              <Icon name={v === 'grid' ? 'LayoutGrid' : 'List'} size={17} />
+            </button>
+          ))}
+        </span>
+      </div>
+
+      {list.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-border bg-background px-6 py-16 text-center">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-secondary text-muted-foreground">
+            <Icon name="MonitorOff" size={26} />
+          </span>
+          <p className="text-[1rem] font-semibold">Здесь пока пусто</p>
+          <p className="max-w-[400px] text-[0.9rem] text-muted-foreground">
+            Введите ID партнёра выше — компьютер появится в списке после первого подключения.
+          </p>
+        </div>
+      ) : view === 'grid' ? (
+        <ul className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-4">
+          {list.map((d) => (
+            <li
+              key={d.id}
+              className="overflow-hidden rounded-xl border border-border bg-background transition-shadow hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)]"
+            >
+              <button
+                type="button"
+                onClick={() => onConnect(d.access_id)}
+                className="grid h-[120px] w-full place-items-center bg-primary/15 text-primary/70"
+              >
+                <span className="flex flex-col items-center gap-2">
+                  <Icon name={osIcon(d.os)} size={38} />
+                  <span className="max-w-[170px] truncate px-2 text-[0.76rem] text-foreground/60">{d.name}</span>
+                </span>
+              </button>
+              <div className="relative flex items-center gap-2 px-3 py-2.5">
+                <span
+                  className={`h-2 w-2 flex-none rounded-full ${
+                    d.is_online ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+                  }`}
+                />
+                <span className="min-w-0 flex-1 truncate font-mono text-[0.88rem]">{fmtId(d.access_id)}</span>
+                {d.is_favorite && <Icon name="Star" size={14} className="flex-none text-primary" />}
+                <button
+                  type="button"
+                  onClick={() => setMenu(menu === d.id ? null : d.id)}
+                  className="text-muted-foreground transition-colors hover:text-primary"
+                  aria-label="Действия"
+                >
+                  <Icon name="EllipsisVertical" size={16} />
+                </button>
+                {menu === d.id && (
+                  <div className="absolute right-2 top-[42px] z-20 w-[215px] overflow-hidden rounded-xl border border-border bg-background py-1 shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => onConnect(d.access_id, 'control')}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[0.86rem] hover:bg-secondary"
+                    >
+                      <Icon name="MousePointerClick" size={15} /> Управлять
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onConnect(d.access_id, 'files')}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[0.86rem] hover:bg-secondary"
+                    >
+                      <Icon name="FolderSync" size={15} /> Передать файлы
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleFav(d)}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[0.86rem] hover:bg-secondary"
+                    >
+                      <Icon name="Star" size={15} /> {d.is_favorite ? 'Убрать из избранного' : 'В избранное'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await api.wakeDevice(d.id);
+                        setMenu(null);
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-[0.86rem] hover:bg-secondary"
+                    >
+                      <Icon name="Power" size={15} /> Включить по сети
+                    </button>
+                  </div>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-background">
+          {list.map((d) => (
+            <li key={d.id} className="flex items-center gap-3 px-4 py-3">
+              <span className={`h-2 w-2 flex-none rounded-full ${d.is_online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+              <Icon name={osIcon(d.os)} size={18} className="flex-none text-muted-foreground" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[0.92rem] font-medium">{d.name}</span>
+                <span className="block font-mono text-[0.78rem] text-muted-foreground">{fmtId(d.access_id)}</span>
+              </span>
+              {d.is_favorite && <Icon name="Star" size={15} className="text-primary" />}
+              <button
+                type="button"
+                onClick={() => onConnect(d.access_id)}
+                className="rounded-lg border border-border px-4 py-2 text-[0.85rem] font-semibold transition-colors hover:border-primary hover:text-primary"
+              >
+                Подключиться
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 };

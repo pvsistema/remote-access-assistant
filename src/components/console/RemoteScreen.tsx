@@ -6,7 +6,8 @@ import { api, type Device, type Message, type Session } from '@/lib/api';
 const tools = [
   { key: 'chat', label: 'Чат', icon: 'MessagesSquare' },
   { key: 'files', label: 'Файлы', icon: 'FolderSync' },
-  { key: 'info', label: 'Система', icon: 'Cpu' },
+  { key: 'terminal', label: 'Командная строка', icon: 'SquareTerminal' },
+  { key: 'info', label: 'Сведения о системе', icon: 'Cpu' },
 ];
 
 const RemoteScreen = ({
@@ -24,6 +25,11 @@ const RemoteScreen = ({
   const [seconds, setSeconds] = useState(0);
   const [quality, setQuality] = useState<'auto' | 'speed' | 'quality'>('auto');
   const [muted, setMuted] = useState(!session.allow_audio);
+  const [monitor, setMonitor] = useState(1);
+  const [recording, setRecording] = useState(Boolean(session.is_recorded));
+  const [fullscreen, setFullscreen] = useState(false);
+  const [cmd, setCmd] = useState('');
+  const [cmdLog, setCmdLog] = useState<string[]>(['Удалённая командная строка. Введите команду ниже.']);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -69,63 +75,121 @@ const RemoteScreen = ({
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-[#101114]">
-      <header className="flex flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3 text-white">
-        <span className="flex items-center gap-2.5">
-          <span className="h-2.5 w-2.5 animate-pulse-dot rounded-full bg-primary" />
-          <span className="text-[0.92rem] font-semibold">
-            {device?.name || `ID ${session.access_id}`}
+      <header className="flex flex-wrap items-center gap-2 border-b border-white/10 bg-[#16181c] px-3 py-2 text-white">
+        <button
+          type="button"
+          onClick={() => setFullscreen((f) => !f)}
+          title="Во весь экран"
+          className="grid h-9 w-9 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <Icon name={fullscreen ? 'Minimize' : 'Maximize'} size={17} />
+        </button>
+
+        <span className="mx-1 flex items-center gap-2 rounded-lg bg-white/10 px-3 py-1.5">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="text-[0.86rem] font-semibold">
+            {device?.name || 'Удалённый ПК'} ({session.access_id})
+          </span>
+          <span className="ml-1 flex gap-1">
+            {[1, 2].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setMonitor(n)}
+                className={`grid h-6 w-6 place-items-center rounded text-[0.75rem] font-semibold transition-colors ${
+                  monitor === n ? 'bg-primary text-white' : 'bg-white/15 text-white/70 hover:text-white'
+                }`}
+                title={`Монитор ${n}`}
+              >
+                {n}
+              </button>
+            ))}
           </span>
         </span>
-        <span className="rounded-pill bg-white/10 px-3 py-1.5 font-mono text-[0.78rem]">{time}</span>
-        {session.is_recorded && (
-          <span className="flex items-center gap-1.5 rounded-pill bg-primary px-3 py-1.5 text-[0.75rem] font-semibold">
-            <span className="h-1.5 w-1.5 rounded-full bg-white" /> REC
-          </span>
-        )}
 
-        <div className="ml-auto flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setQuality(quality === 'auto' ? 'speed' : quality === 'speed' ? 'quality' : 'auto')}
-            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[0.83rem] text-white/80 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            <Icon name="Gauge" size={16} />
-            {quality === 'auto' ? 'Авто' : quality === 'speed' ? 'Скорость' : 'Качество'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMuted((m) => !m)}
-            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
-            title={muted ? 'Включить звук' : 'Выключить звук'}
-          >
-            <Icon name={muted ? 'VolumeX' : 'Volume2'} size={17} />
-          </button>
-          <button
-            type="button"
-            onClick={() => toast({ title: 'Ctrl+Alt+Del отправлен', description: 'Комбинация передана на удалённый компьютер' })}
-            className="rounded-lg px-3 py-2 font-mono text-[0.78rem] text-white/80 transition-colors hover:bg-white/10 hover:text-white"
-          >
-            Ctrl+Alt+Del
-          </button>
+        <span className="rounded-lg bg-white/10 px-2.5 py-1.5 font-mono text-[0.78rem]">{time}</span>
+
+        <div className="ml-auto flex flex-wrap items-center gap-0.5">
           {tools.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setPanel(panel === t.key ? null : t.key)}
-              className={`inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[0.83rem] transition-colors ${
+              title={t.label}
+              className={`grid h-9 w-9 place-items-center rounded-lg transition-colors ${
                 panel === t.key ? 'bg-primary text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'
               }`}
             >
-              <Icon name={t.icon} size={16} />
-              <span className="hidden sm:inline">{t.label}</span>
+              <Icon name={t.icon} size={17} />
             </button>
           ))}
+
+          <span className="mx-1 h-6 w-px bg-white/15" />
+
+          <button
+            type="button"
+            onClick={() => toast({ title: 'Ctrl+Alt+Del отправлен', description: 'Комбинация передана на удалённый компьютер' })}
+            title="Отправить Ctrl+Alt+Del"
+            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="Zap" size={17} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setQuality(quality === 'auto' ? 'speed' : quality === 'speed' ? 'quality' : 'auto')}
+            title="Качество изображения"
+            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[0.8rem] text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="MonitorCog" size={17} />
+            <span className="hidden lg:inline">
+              {quality === 'auto' ? 'Авто' : quality === 'speed' ? 'Скорость' : 'Качество'}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setRecording((r) => !r);
+              toast({ title: recording ? 'Запись остановлена' : 'Идёт запись сеанса' });
+            }}
+            title="Запись сеанса"
+            className={`grid h-9 w-9 place-items-center rounded-lg transition-colors ${
+              recording ? 'bg-primary text-white' : 'text-white/80 hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <Icon name="Video" size={17} />
+          </button>
+          <button
+            type="button"
+            onClick={() => toast({ title: 'Скриншот сохранён', description: 'Снимок экрана добавлен в файлы сеанса' })}
+            title="Снимок экрана"
+            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="Camera" size={17} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setMuted((m) => !m)}
+            title={muted ? 'Включить звук' : 'Выключить звук'}
+            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Icon name={muted ? 'VolumeX' : 'Volume2'} size={17} />
+          </button>
+          <button
+            type="button"
+            onClick={() => toast({ title: 'Голосовой вызов', description: 'Идёт соединение с пользователем' })}
+            title="Голосовой вызов"
+            className="grid h-9 w-9 place-items-center rounded-lg text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+          >
+            <Icon name="Phone" size={17} />
+          </button>
+
           <button
             type="button"
             onClick={finish}
-            className="ml-1 inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-[0.85rem] font-semibold text-white transition-opacity hover:opacity-90"
+            title="Завершить сеанс"
+            className="ml-1.5 grid h-9 w-9 place-items-center rounded-lg bg-primary text-white transition-opacity hover:opacity-90"
           >
-            <Icon name="PhoneOff" size={16} /> Завершить
+            <Icon name="X" size={18} />
           </button>
         </div>
       </header>
@@ -133,6 +197,11 @@ const RemoteScreen = ({
       <div className="flex min-h-0 flex-1">
         <div className="relative flex flex-1 items-center justify-center overflow-hidden">
           <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(#fff_1px,transparent_1px),linear-gradient(90deg,#fff_1px,transparent_1px)] [background-size:44px_44px]" />
+          {recording && (
+            <span className="absolute left-4 top-4 flex items-center gap-2 rounded-lg bg-primary px-3 py-1.5 text-[0.75rem] font-semibold text-white">
+              <span className="h-2 w-2 animate-pulse-dot rounded-full bg-white" /> REC
+            </span>
+          )}
           <div className="relative flex flex-col items-center gap-4 text-center text-white/70">
             <span className="grid h-16 w-16 place-items-center rounded-2xl bg-white/10">
               <Icon name="MonitorPlay" size={30} />
@@ -215,6 +284,35 @@ const RemoteScreen = ({
               </div>
             )}
 
+            {panel === 'terminal' && (
+              <div className="flex flex-1 flex-col p-4">
+                <div className="flex-1 overflow-auto rounded-lg bg-black/50 p-3 font-mono text-[0.78rem] leading-[1.6] text-emerald-300">
+                  {cmdLog.map((l, i) => (
+                    <div key={i}>{l}</div>
+                  ))}
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!cmd.trim()) return;
+                    setCmdLog((l) => [...l, `C:\\> ${cmd}`, 'Команда отправлена на удалённый компьютер']);
+                    setCmd('');
+                  }}
+                  className="mt-2 flex items-center gap-2"
+                >
+                  <input
+                    value={cmd}
+                    onChange={(e) => setCmd(e.target.value)}
+                    placeholder="Команда"
+                    className="h-10 flex-1 rounded-lg bg-white/10 px-3 font-mono text-[0.82rem] text-white outline-none placeholder:text-white/40"
+                  />
+                  <button type="submit" className="grid h-10 w-10 place-items-center rounded-lg bg-primary">
+                    <Icon name="CornerDownLeft" size={16} />
+                  </button>
+                </form>
+              </div>
+            )}
+
             {panel === 'info' && (
               <div className="flex flex-col gap-3 p-5 text-[0.88rem]">
                 {[
@@ -235,6 +333,18 @@ const RemoteScreen = ({
           </aside>
         )}
       </div>
+
+      <footer className="flex h-[34px] flex-none items-center gap-4 border-t border-white/10 bg-[#16181c] px-4 text-[0.78rem] text-white/60">
+        <span className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          {session.status === 'pending' ? 'Ожидание подтверждения' : 'Соединение установлено'}
+        </span>
+        <span className="hidden sm:inline">Монитор {monitor}</span>
+        <span className="hidden sm:inline">
+          {quality === 'auto' ? 'Качество: авто' : quality === 'speed' ? 'Приоритет скорости' : 'Приоритет качества'}
+        </span>
+        <span className="ml-auto font-mono">Код {session.session_code}</span>
+      </footer>
     </div>
   );
 };
