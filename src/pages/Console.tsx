@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import ConsoleShell, { type TabKey } from '@/components/console/ConsoleShell';
 import DevicesTab from '@/components/console/DevicesTab';
@@ -18,10 +18,12 @@ const empty: Overview = {
 
 const Console = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialId = searchParams.get('id') || '';
   const [user, setUser] = useState<User | null>(null);
   const [data, setData] = useState<Overview>(empty);
-  const [tab, setTab] = useState<TabKey>('devices');
-  const [presetId, setPresetId] = useState('');
+  const [tab, setTab] = useState<TabKey>(initialId ? 'connect' : 'devices');
+  const [presetId, setPresetId] = useState(initialId);
   const [loading, setLoading] = useState(true);
 
   const logout = useCallback(() => {

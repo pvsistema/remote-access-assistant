@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { api, setToken, ERRORS } from '@/lib/api';
 
 const Login = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const presetId = searchParams.get('id') || '';
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [form, setForm] = useState({ email: '', password: '', full_name: '', company: '' });
   const [error, setError] = useState('');
@@ -27,7 +29,7 @@ const Login = () => {
               company: form.company.trim(),
             });
       setToken(res.token);
-      navigate('/console');
+      navigate(presetId ? `/console?id=${presetId}` : '/console');
     } catch (err) {
       setError(ERRORS[(err as Error).message] || 'Не удалось выполнить вход');
     } finally {

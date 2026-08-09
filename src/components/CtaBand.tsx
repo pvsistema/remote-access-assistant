@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 
 const CtaBand = () => {
@@ -32,12 +33,13 @@ const CtaBand = () => {
                 <Icon name="Download" size={18} />
                 Скачать бесплатно
               </a>
-              <a
-                href="#contacts"
+              <Link
+                to="/login"
                 className="inline-flex items-center gap-2.5 rounded-pill border border-background/30 px-[30px] py-[17px] text-[0.95rem] font-semibold leading-none text-background transition-colors hover:bg-background hover:text-foreground"
               >
-                Получить консультацию
-              </a>
+                <Icon name="LayoutDashboard" size={18} />
+                Войти в веб-консоль
+              </Link>
             </div>
           </div>
         </div>

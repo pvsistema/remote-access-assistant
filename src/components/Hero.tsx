@@ -1,3 +1,6 @@
+import Icon from '@/components/ui/icon';
+import QuickConnect from '@/components/QuickConnect';
+
 const HERO_IMAGE =
   'https://cdn.poehali.dev/projects/42fb022b-172b-44cd-99bf-901d0446c150/files/65ea7778-164a-4aa8-8614-b713ed5a720c.jpg';
 
@@ -16,12 +19,17 @@ const Hero = () => {
             видите его экран, управляете мышью и передаёте файлы. Без настройки роутера, VPN и прав
             администратора.
           </p>
-          <div className="mt-[34px] flex animate-rise flex-wrap items-center gap-5 [animation-delay:.23s]">
+          <div className="mt-[30px] max-w-[540px] animate-rise [animation-delay:.23s]">
+            <QuickConnect />
+          </div>
+
+          <div className="mt-6 flex animate-rise flex-wrap items-center gap-5 [animation-delay:.3s]">
             <a
               href="#download"
-              className="inline-flex items-center gap-2.5 rounded-pill border border-primary bg-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary-foreground transition-colors hover:border-destructive hover:bg-destructive"
+              className="inline-flex items-center gap-2.5 rounded-pill border border-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
             >
-              Скачать для Windows
+              <Icon name="Download" size={17} />
+              Скачать программу
             </a>
             <span className="max-w-[26ch] text-[0.85rem] leading-[1.45] text-muted-foreground">
               14,8&nbsp;МБ, без установки. Серверы в&nbsp;России, реестр&nbsp;РФ.

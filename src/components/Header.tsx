@@ -4,6 +4,7 @@ import Icon from '@/components/ui/icon';
 
 const mainNav = [
   { label: 'Возможности', href: '#features' },
+  { label: 'Веб-консоль', href: '#console' },
   { label: 'Скачать', href: '#download' },
   { label: 'Цены', href: '#pricing' },
   { label: 'Поддержка', href: '#contacts' },
@@ -169,10 +170,18 @@ const Header = () => {
                 {item.label}
               </a>
             ))}
+            <Link
+              to="/login"
+              onClick={() => setOpen(false)}
+              className="mt-3 inline-flex items-center justify-center gap-2.5 rounded-pill bg-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary-foreground"
+            >
+              <Icon name="LogIn" size={18} />
+              Личный кабинет
+            </Link>
             <a
               href="#download"
               onClick={() => setOpen(false)}
-              className="mt-3 inline-flex items-center justify-center gap-2.5 rounded-pill bg-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary-foreground"
+              className="mt-2 inline-flex items-center justify-center gap-2.5 rounded-pill border border-primary px-[30px] py-[15px] text-[0.95rem] font-semibold leading-none text-primary"
             >
               <Icon name="Download" size={18} />
               Скачать программу
