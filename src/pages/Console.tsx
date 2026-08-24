@@ -148,6 +148,8 @@ const Console = () => {
           devices={data.devices}
           sessions={data.sessions}
           myAccessId={myDevice?.access_id || ''}
+          myPassword={password}
+          onRefreshPassword={refreshPassword}
           onRefresh={load}
           onConnect={quickConnect}
         />

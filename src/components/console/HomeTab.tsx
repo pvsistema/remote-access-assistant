@@ -21,16 +21,21 @@ const HomeTab = ({
   devices,
   sessions,
   myAccessId,
+  myPassword,
+  onRefreshPassword,
   onConnect,
   onRefresh,
 }: {
   devices: Device[];
   sessions: Session[];
   myAccessId: string;
+  myPassword: string;
+  onRefreshPassword: () => void;
   onConnect: (accessId: string, mode?: string) => void;
   onRefresh: () => void;
 }) => {
   const [partnerId, setPartnerId] = useState('');
+  const [copied, setCopied] = useState('');
   const [filter, setFilter] = useState('recent');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [query, setQuery] = useState('');
@@ -60,9 +65,75 @@ const HomeTab = ({
 
   const fmtId = (v: string) => v.replace(/(\d{3})(?=\d)/g, '$1 ');
 
+  const copy = (value: string, key: string) => {
+    navigator.clipboard.writeText(value).catch(() => undefined);
+    setCopied(key);
+    setTimeout(() => setCopied(''), 1600);
+  };
+
   return (
     <div className="flex flex-col gap-6">
-      <section className="max-w-[520px] rounded-2xl border border-border bg-background p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl border-2 border-primary/25 bg-primary/[0.04] p-6">
+          <h2 className="flex items-center gap-2 text-[1.05rem] font-bold leading-tight">
+            <Icon name="MonitorSmartphone" size={19} className="text-primary" />
+            Этот компьютер
+          </h2>
+          <p className="mt-1.5 text-[0.86rem] text-muted-foreground">
+            Продиктуйте эти данные, чтобы к вам подключились
+          </p>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-border bg-background p-4">
+              <span className="flex items-center gap-2">
+                <span className="text-[0.8rem] font-medium text-muted-foreground">Ваш ID</span>
+                <button
+                  type="button"
+                  onClick={() => myAccessId && copy(myAccessId, 'id')}
+                  title="Скопировать ID"
+                  className="ml-auto text-muted-foreground transition-colors hover:text-primary"
+                >
+                  <Icon name={copied === 'id' ? 'Check' : 'Copy'} size={16} />
+                </button>
+              </span>
+              <span className="mt-1 block select-all font-head text-[1.6rem] font-bold leading-tight tracking-[0.02em]">
+                {myAccessId ? fmtId(myAccessId) : '— — —'}
+              </span>
+            </div>
+
+            <div className="rounded-xl border border-border bg-background p-4">
+              <span className="flex items-center gap-2">
+                <span className="text-[0.8rem] font-medium text-muted-foreground">Пароль</span>
+                <button
+                  type="button"
+                  onClick={() => myPassword && copy(myPassword, 'pass')}
+                  title="Скопировать пароль"
+                  className="ml-auto text-muted-foreground transition-colors hover:text-primary"
+                >
+                  <Icon name={copied === 'pass' ? 'Check' : 'Copy'} size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={onRefreshPassword}
+                  title="Сменить пароль"
+                  className="text-muted-foreground transition-colors hover:text-primary"
+                >
+                  <Icon name="RotateCcw" size={15} />
+                </button>
+              </span>
+              <span className="mt-1 block select-all font-mono text-[1.6rem] font-bold leading-tight tracking-[0.08em]">
+                {myPassword || '——————'}
+              </span>
+            </div>
+          </div>
+
+          <p className="mt-4 flex items-start gap-2 text-[0.82rem] text-muted-foreground">
+            <Icon name="ShieldCheck" size={15} className="mt-0.5 flex-none text-primary" />
+            Никто не подключится без вашего разрешения — вы увидите запрос и нажмёте «Разрешить».
+          </p>
+        </section>
+
+      <section className="rounded-2xl border border-border bg-background p-6 shadow-[0_1px_3px_rgba(0,0,0,0.05)]">
         <h2 className="text-[1.15rem] font-bold leading-tight">Управление удалённым рабочим столом</h2>
         <input
           value={partnerId}
@@ -112,6 +183,7 @@ const HomeTab = ({
           )}
         </div>
       </section>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         {filters.map((f) => (
