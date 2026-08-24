@@ -141,10 +141,21 @@ export const api = {
     }),
   me: () => request<{ user: User }>(`${AUTH_URL}?action=me`),
   overview: () => request<Overview>(`${AGENT_URL}?action=overview`),
-  createSession: (access_id: string, mode: string, permissions?: Permissions) =>
+  createSession: (access_id: string, mode: string, permissions?: Permissions, password?: string) =>
     request<{ session: Session }>(`${AGENT_URL}?action=create_session`, {
       method: 'POST',
-      body: JSON.stringify({ access_id, mode, permissions }),
+      body: JSON.stringify({ access_id, mode, permissions, password }),
+    }),
+  myIncoming: () => request<{ sessions: Session[] }>(`${AGENT_URL}?action=my_incoming`),
+  confirmSession: (session_id: number) =>
+    request<{ ok: boolean }>(`${AGENT_URL}?action=confirm_session`, {
+      method: 'POST',
+      body: JSON.stringify({ session_id }),
+    }),
+  setDevicePassword: (device_id: number, password: string) =>
+    request<{ ok: boolean }>(`${AGENT_URL}?action=set_device_password`, {
+      method: 'POST',
+      body: JSON.stringify({ device_id, password }),
     }),
   createGroup: (name: string) =>
     request<{ group: Group }>(`${AGENT_URL}?action=create_group`, {
@@ -189,7 +200,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ member_id, role, status }),
     }),
-  updateSession: (session_id: number, status: 'active' | 'closed' | 'rejected') =>
+  updateSession: (session_id: number, status: 'closed' | 'rejected') =>
     request<{ ok: boolean }>(`${AGENT_URL}?action=update_session`, {
       method: 'POST',
       body: JSON.stringify({ session_id, status }),
@@ -255,7 +266,11 @@ export const ERRORS: Record<string, string> = {
   email_exists: 'Этот e-mail уже зарегистрирован',
   bad_credentials: 'Проверьте почту и пароль (от 6 символов)',
   unauthorized: 'Сессия истекла, войдите заново',
-  device_not_found: 'Устройство не найдено',
+  device_not_found: 'Устройство с таким ID не найдено',
   session_not_found: 'Сеанс не найден',
   request_failed: 'Не удалось выполнить запрос',
+  password_required: 'Введите пароль удалённого компьютера',
+  bad_device_password: 'Неверный пароль удалённого компьютера',
+  password_too_short: 'Пароль должен быть не короче 4 символов',
+  confirm_on_remote_side: 'Подтвердить сеанс может только удалённый компьютер',
 };

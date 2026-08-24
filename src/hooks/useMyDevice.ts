@@ -56,6 +56,7 @@ export const useMyDevice = (enabled: boolean, onRegistered?: () => void) => {
         app_version: 'web 3.0',
         local_ip: '',
         unattended: false,
+        password: saved,
       })
       .then((r) => {
         setDevice(r.device as Device);
@@ -69,8 +70,9 @@ export const useMyDevice = (enabled: boolean, onRegistered?: () => void) => {
     const p = makePassword();
     localStorage.setItem(PASS_KEY, p);
     setPassword(p);
+    if (device?.id) api.setDevicePassword(device.id, p).catch(() => undefined);
     return p;
-  }, []);
+  }, [device?.id]);
 
   return { device, password, refreshPassword };
 };

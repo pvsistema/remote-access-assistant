@@ -14,7 +14,7 @@ import { IncomingSessionPrompt, SharingBar } from '@/components/console/Incoming
 import { useMyDevice } from '@/hooks/useMyDevice';
 import { useIncomingSession } from '@/hooks/useIncomingSession';
 import { toast } from '@/hooks/use-toast';
-import { api, clearToken, getToken, type Overview, type Session, type User } from '@/lib/api';
+import { api, clearToken, ERRORS, getToken, type Overview, type Session, type User } from '@/lib/api';
 
 const empty: Overview = {
   devices: [],
@@ -64,7 +64,7 @@ const Console = () => {
   }, [load, navigate]);
 
   const { device: myDevice, password, refreshPassword } = useMyDevice(!loading, load);
-  const { incoming, sharing, accept, reject, stopSharing } = useIncomingSession(myDevice?.id);
+  const { incoming, sharing, accept, reject, stopSharing } = useIncomingSession();
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -73,24 +73,27 @@ const Console = () => {
     return () => clearInterval(id);
   }, []);
 
-  const quickConnect = async (accessId: string, mode = 'control') => {
+  const quickConnect = async (accessId: string, mode = 'control', password?: string) => {
     const clean = accessId.replace(/\D/g, '');
     if (clean.length < 6) {
       toast({ title: 'Введите ID', description: 'ID партнёра состоит из 9 цифр' });
       return;
     }
     try {
-      const res = await api.createSession(clean, mode, {
-        control: mode === 'control',
-        files: true,
-        clipboard: true,
-        audio: false,
-        record: false,
-      });
-      await api.updateSession(res.session.id, 'active');
-      setScreen({ ...res.session, status: 'active', access_id: clean });
+      const res = await api.createSession(
+        clean,
+        mode,
+        { control: mode === 'control', files: true, clipboard: true, audio: false, record: false },
+        password,
+      );
+      // The session stays "pending" until the remote user presses "Разрешить".
+      setScreen({ ...res.session, status: 'pending', access_id: clean });
       load();
-    } catch {
+    } catch (err) {
+      const code = (err as Error).message;
+      if (code === 'password_required' || code === 'bad_device_password') {
+        toast({ title: ERRORS[code], description: 'Укажите пароль на вкладке «Подключение»' });
+      }
       setPresetId(clean);
       setTab('connect');
     }

@@ -46,6 +46,7 @@ const ConnectTab = ({
     record: false,
   });
   const [active, setActive] = useState<Session | null>(null);
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -63,6 +64,15 @@ const ConnectTab = ({
     return () => clearInterval(id);
   }, [active]);
 
+  // While waiting for consent, watch the session status from the overview feed.
+  useEffect(() => {
+    if (!active || active.status !== 'pending') return;
+    const fresh = sessions.find((s) => s.id === active.id);
+    if (fresh && fresh.status !== 'pending') {
+      setActive((cur) => (cur ? { ...cur, status: fresh.status } : cur));
+    }
+  }, [sessions, active]);
+
   const start = async () => {
     const clean = accessId.replace(/\D/g, '');
     if (clean.length < 6) {
@@ -72,7 +82,7 @@ const ConnectTab = ({
     setError('');
     setLoading(true);
     try {
-      const res = await api.createSession(clean, mode, perms);
+      const res = await api.createSession(clean, mode, perms, password.trim() || undefined);
       setActive(res.session);
       setMessages([]);
       onChanged();
@@ -83,10 +93,10 @@ const ConnectTab = ({
     }
   };
 
-  const update = async (status: 'active' | 'closed' | 'rejected') => {
+  const update = async (status: 'closed' | 'rejected') => {
     if (!active) return;
     await api.updateSession(active.id, status);
-    setActive(status === 'active' ? { ...active, status: 'active' } : null);
+    setActive(null);
     onChanged();
   };
 
@@ -150,6 +160,23 @@ const ConnectTab = ({
             <Icon name="Monitor" size={15} /> {device.name} · {device.is_online ? 'в сети' : 'не в сети'}
           </p>
         )}
+
+        <label className="mt-4 block">
+          <span className="text-[0.85rem] font-medium text-muted-foreground">
+            Пароль удалённого компьютера
+          </span>
+          <input
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            type="password"
+            autoComplete="off"
+            placeholder="Спросите у владельца компьютера"
+            className="mt-2 h-[52px] w-full rounded-2xl border border-input bg-background px-5 font-mono text-[1.05rem] tracking-[0.08em] outline-none focus:border-primary"
+          />
+          <span className="mt-1.5 block text-[0.8rem] text-muted-foreground">
+            Не нужен для своих устройств. Пользователь на том компьютере всё равно подтверждает вход.
+          </span>
+        </label>
 
         <div className="mt-5 grid gap-2.5 sm:grid-cols-3">
           {modes.map((m) => (
@@ -223,18 +250,23 @@ const ConnectTab = ({
               </div>
             </div>
             <p className="mt-3 text-[0.85rem] text-muted-foreground">
-              Канал: {active.relay_url} · действует 15 минут
+              {active.status === 'pending'
+                ? 'Ждём, пока пользователь на удалённом компьютере нажмёт «Разрешить». Запрос действует 15 минут.'
+                : 'Доступ разрешён — можно открывать рабочий стол.'}
             </p>
             <div className="mt-5 flex flex-wrap gap-2.5">
               <button
                 type="button"
-                onClick={async () => {
-                  if (active.status === 'pending') await update('active');
-                  setScreen({ ...active, status: 'active' });
-                }}
-                className="inline-flex items-center gap-2 rounded-pill bg-primary px-5 py-3 text-[0.88rem] font-semibold leading-none text-primary-foreground"
+                disabled={active.status === 'pending'}
+                onClick={() => setScreen({ ...active, status: 'active' })}
+                className="inline-flex items-center gap-2 rounded-pill bg-primary px-5 py-3 text-[0.88rem] font-semibold leading-none text-primary-foreground disabled:opacity-50"
               >
-                <Icon name="MonitorPlay" size={16} /> Открыть рабочий стол
+                <Icon
+                  name={active.status === 'pending' ? 'LoaderCircle' : 'MonitorPlay'}
+                  size={16}
+                  className={active.status === 'pending' ? 'animate-spin' : ''}
+                />
+                {active.status === 'pending' ? 'Ожидаем подтверждения' : 'Открыть рабочий стол'}
               </button>
               <button
                 type="button"

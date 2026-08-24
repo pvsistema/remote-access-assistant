@@ -1,6 +1,8 @@
+import hashlib
 import json
 import os
 import random
+import secrets
 import string
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
@@ -26,6 +28,22 @@ def _resp(status: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def _digits(n: int) -> str:
     return ''.join(random.choice(string.digits) for _ in range(n))
+
+
+def _pwd_hash(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 120000).hex()
+
+
+def _make_pwd(password: str) -> str:
+    salt = secrets.token_hex(8)
+    return f'{salt}${_pwd_hash(password, salt)}'
+
+
+def _check_pwd(password: str, stored: str) -> bool:
+    if not stored or '$' not in stored:
+        return False
+    salt, digest = stored.split('$', 1)
+    return secrets.compare_digest(_pwd_hash(password, salt), digest)
 
 
 def _auth(cur, token: str) -> Optional[dict]:
@@ -168,6 +186,13 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 (aid, device_uid, access_id, name, os_name, os_version, app_version, local_ip, unattended),
             )
         dev = dict(cur.fetchone())
+        # Store the device access password so other accounts can connect with it.
+        supplied_pwd = (body.get('password') or '').strip()
+        if len(supplied_pwd) >= 4:
+            cur.execute(
+                f"UPDATE {SCHEMA}.devices SET permanent_password=%s WHERE id=%s",
+                (_make_pwd(supplied_pwd), dev['id']),
+            )
         _log(cur, aid, 'device_register', f"Устройство «{dev['name']}» подключено к аккаунту", dev['id'], None, ip)
         return _resp(200, {'device': dev, 'relay_url': RELAY_URL})
 
@@ -200,10 +225,27 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     if action == 'create_session':
         access_id = (body.get('access_id') or '').strip()
         mode = (body.get('mode') or 'control')[:24]
+        supplied = (body.get('password') or '').strip()
         cur.execute(
-            f"SELECT id, name, account_id FROM {SCHEMA}.devices WHERE access_id=%s", (access_id,)
+            f"SELECT id, name, account_id, permanent_password, unattended "
+            f"FROM {SCHEMA}.devices WHERE access_id=%s",
+            (access_id,),
         )
         dev = cur.fetchone()
+        if not dev:
+            return _resp(404, {'error': 'device_not_found'})
+
+        # A device from another account may only be accessed with its password.
+        own = dev['account_id'] == aid
+        if not own:
+            if not dev['permanent_password']:
+                return _resp(403, {'error': 'password_required'})
+            if not supplied:
+                return _resp(403, {'error': 'password_required'})
+            if not _check_pwd(supplied, dev['permanent_password']):
+                _log(cur, aid, 'session_denied', f'Неверный пароль к ID {access_id}', dev['id'], None, ip)
+                return _resp(403, {'error': 'bad_device_password'})
+
         code = _digits(6)
         otp = _digits(4)
         expires = datetime.utcnow() + timedelta(minutes=15)
@@ -215,39 +257,37 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             f"VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             f"RETURNING id, session_code, one_time_password, expires_at, status, mode, "
             f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded",
-            (aid, dev['id'] if dev else None, access_id, code, otp, mode,
+            (aid, dev['id'], access_id, code, otp, mode,
              user['full_name'] or user['email'], RELAY_URL, expires,
              bool(perms.get('control', mode == 'control')), bool(perms.get('files', True)),
              bool(perms.get('clipboard', True)), bool(perms.get('audio', False)),
              bool(perms.get('record', False))),
         )
         sess = dict(cur.fetchone())
-        _log(cur, aid, 'session_create', f'Создан сеанс к ID {access_id}', dev['id'] if dev else None, sess['id'], ip)
+        _log(cur, aid, 'session_create', f'Создан сеанс к ID {access_id}', dev['id'], sess['id'], ip)
         sess['relay_url'] = RELAY_URL
-        sess['device_name'] = dev['name'] if dev else None
+        sess['device_name'] = dev['name']
         return _resp(200, {'session': sess})
 
     if action == 'update_session':
         session_id = body.get('session_id')
         status = (body.get('status') or '')[:24]
-        if status not in ('active', 'closed', 'rejected'):
-            return _resp(400, {'error': 'bad_status'})
-        if status == 'active':
-            cur.execute(
-                f"UPDATE {SCHEMA}.sessions SET status='active', started_at=NOW() WHERE id=%s AND account_id=%s "
-                f"RETURNING id, device_id, access_id",
-                (session_id, aid),
-            )
-        else:
-            cur.execute(
-                f"UPDATE {SCHEMA}.sessions SET status=%s, ended_at=NOW() WHERE id=%s AND account_id=%s "
-                f"RETURNING id, device_id, access_id",
-                (status, session_id, aid),
-            )
+        if status not in ('closed', 'rejected'):
+            # Only the controlled machine may confirm a session (action=confirm_session).
+            return _resp(403, {'error': 'confirm_on_remote_side'})
+        # Either side may end the session: the operator who started it,
+        # or the owner of the controlled device.
+        cur.execute(
+            f"UPDATE {SCHEMA}.sessions s SET status=%s, ended_at=NOW() "
+            f"WHERE s.id=%s AND (s.account_id=%s OR s.device_id IN "
+            f"(SELECT id FROM {SCHEMA}.devices WHERE account_id=%s)) "
+            f"RETURNING s.id, s.device_id, s.access_id",
+            (status, session_id, aid, aid),
+        )
         row = cur.fetchone()
         if not row:
             return _resp(404, {'error': 'session_not_found'})
-        labels = {'active': 'Сеанс подтверждён', 'closed': 'Сеанс завершён', 'rejected': 'Сеанс отклонён'}
+        labels = {'closed': 'Сеанс завершён', 'rejected': 'Сеанс отклонён'}
         _log(cur, aid, f'session_{status}', f"{labels[status]} · ID {row['access_id']}", row['device_id'], row['id'], ip)
         return _resp(200, {'ok': True, 'status': status})
 
@@ -351,5 +391,49 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         if not row:
             return _resp(404, {'error': 'device_not_found'})
         return _resp(200, {'device': dict(row)})
+
+    # --- Consent on the controlled side ---
+
+    # Sessions requested BY OTHERS to devices owned by this account.
+    if action == 'my_incoming':
+        cur.execute(
+            f"SELECT s.id, s.access_id, s.session_code, s.status, s.mode, s.operator_name, "
+            f"s.created_at, s.expires_at, s.allow_control, s.allow_files, s.allow_clipboard, "
+            f"s.allow_audio, s.is_recorded, d.device_uid, d.name AS device_name "
+            f"FROM {SCHEMA}.sessions s JOIN {SCHEMA}.devices d ON d.id = s.device_id "
+            f"WHERE d.account_id=%s AND s.status IN ('pending','active') AND s.expires_at > NOW() "
+            f"ORDER BY s.created_at DESC LIMIT 10",
+            (aid,),
+        )
+        return _resp(200, {'sessions': [dict(r) for r in cur.fetchall()]})
+
+    # The controlled machine confirms an incoming request.
+    if action == 'confirm_session':
+        cur.execute(
+            f"UPDATE {SCHEMA}.sessions s SET status='active', started_at=NOW() "
+            f"WHERE s.id=%s AND s.status='pending' AND s.expires_at > NOW() "
+            f"AND s.device_id IN (SELECT id FROM {SCHEMA}.devices WHERE account_id=%s) "
+            f"RETURNING s.id, s.device_id, s.access_id",
+            (body.get('session_id'), aid),
+        )
+        row = cur.fetchone()
+        if not row:
+            return _resp(404, {'error': 'session_not_found'})
+        _log(cur, aid, 'session_active', f"Сеанс подтверждён · ID {row['access_id']}",
+             row['device_id'], row['id'], ip)
+        return _resp(200, {'ok': True, 'status': 'active'})
+
+    # Owner sets/updates the permanent access password of their device.
+    if action == 'set_device_password':
+        password = (body.get('password') or '').strip()
+        if len(password) < 4:
+            return _resp(400, {'error': 'password_too_short'})
+        cur.execute(
+            f"UPDATE {SCHEMA}.devices SET permanent_password=%s WHERE id=%s AND account_id=%s RETURNING id",
+            (_make_pwd(password), body.get('device_id'), aid),
+        )
+        if not cur.fetchone():
+            return _resp(404, {'error': 'device_not_found'})
+        return _resp(200, {'ok': True})
 
     return _resp(400, {'error': 'unknown_action'})

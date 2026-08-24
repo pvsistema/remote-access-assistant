@@ -18,27 +18,23 @@ const stopAgent = () => {
 
 // Watches for an operator connecting to THIS device and lets the local user
 // accept or reject. On accept, tells the C# host to start desktop sharing.
-export function useIncomingSession(myDeviceId: number | undefined) {
+export function useIncomingSession() {
   const [incoming, setIncoming] = useState<Session | null>(null);
   const [sharing, setSharing] = useState<Session | null>(null);
 
   useEffect(() => {
-    if (!myDeviceId) return;
     const tick = async () => {
       try {
-        const ov = await api.overview();
+        const { sessions } = await api.myIncoming();
         const now = Date.now();
-        const pending = ov.sessions.find(
-          (s) =>
-            s.status === 'pending' &&
-            ov.devices.some((d) => d.id === myDeviceId && d.access_id === s.access_id) &&
-            new Date(s.expires_at).getTime() > now,
+        const pending = sessions.find(
+          (s) => s.status === 'pending' && new Date(s.expires_at).getTime() > now,
         );
         setIncoming((cur) => (cur && cur.id === pending?.id ? cur : pending ?? null));
 
         // Operator ended the session — stop sharing.
         if (sharing) {
-          const still = ov.sessions.find((s) => s.id === sharing.id);
+          const still = sessions.find((s) => s.id === sharing.id);
           if (!still || still.status !== 'active') {
             stopAgent();
             setSharing(null);
@@ -53,10 +49,10 @@ export function useIncomingSession(myDeviceId: number | undefined) {
       if (getToken()) tick();
     }, 3000);
     return () => clearInterval(id);
-  }, [myDeviceId, sharing]);
+  }, [sharing]);
 
   const accept = useCallback(async (session: Session) => {
-    await api.updateSession(session.id, 'active');
+    await api.confirmSession(session.id);
     startAgent(session);
     setSharing(session);
     setIncoming(null);
