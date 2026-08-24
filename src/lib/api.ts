@@ -3,10 +3,17 @@ export const AGENT_URL = 'https://functions.poehali.dev/71f9d96f-2470-4e7e-b343-
 export const STREAM_URL = 'https://functions.poehali.dev/db97b202-938b-4e3c-bee5-4e64927b6717';
 
 const TOKEN_KEY = 'pv_token';
+const GUEST_KEY = 'pv_guest_token';
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
 export const setToken = (t: string) => localStorage.setItem(TOKEN_KEY, t);
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+
+// Guest mode: work by ID + password without registration.
+export const getGuestToken = () => localStorage.getItem(GUEST_KEY) || '';
+export const setGuestToken = (t: string) => localStorage.setItem(GUEST_KEY, t);
+export const clearGuestToken = () => localStorage.removeItem(GUEST_KEY);
+export const isGuest = () => !getToken() && Boolean(getGuestToken());
 
 export type User = {
   id: number;
@@ -120,6 +127,7 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     headers: {
       'Content-Type': 'application/json',
       'X-Auth-Token': getToken(),
+      ...(getGuestToken() ? { 'X-Guest-Token': getGuestToken() } : {}),
       ...(init.headers || {}),
     },
   });
@@ -146,7 +154,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ access_id, mode, permissions, password }),
     }),
-  myIncoming: () => request<{ sessions: Session[] }>(`${AGENT_URL}?action=my_incoming`),
+  guestRegister: (payload: { name?: string; os?: string; os_version?: string; device_uid?: string }) =>
+    request<{ guest_token: string; device: Device; password: string }>(
+      `${AGENT_URL}?action=guest_register`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  guestState: () =>
+    request<{ device: Device | null; sessions: Session[] }>(`${AGENT_URL}?action=guest_state`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  myIncoming: () =>
+    request<{ sessions: Session[] }>(`${AGENT_URL}?action=my_incoming`, {
+      method: 'POST',
+      body: '{}',
+    }),
   confirmSession: (session_id: number) =>
     request<{ ok: boolean }>(`${AGENT_URL}?action=confirm_session`, {
       method: 'POST',

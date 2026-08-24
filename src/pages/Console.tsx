@@ -14,7 +14,18 @@ import { IncomingSessionPrompt, SharingBar } from '@/components/console/Incoming
 import { useMyDevice } from '@/hooks/useMyDevice';
 import { useIncomingSession } from '@/hooks/useIncomingSession';
 import { toast } from '@/hooks/use-toast';
-import { api, clearToken, ERRORS, getToken, type Overview, type Session, type User } from '@/lib/api';
+import {
+  api,
+  clearToken,
+  clearGuestToken,
+  ERRORS,
+  getToken,
+  isGuest,
+  type Device,
+  type Overview,
+  type Session,
+  type User,
+} from '@/lib/api';
 
 const empty: Overview = {
   devices: [],
@@ -40,14 +51,26 @@ const Console = () => {
 
   const logout = useCallback(() => {
     clearToken();
+    clearGuestToken();
+    localStorage.removeItem('pv_guest_pass');
     navigate('/login');
   }, [navigate]);
 
+  const guest = isGuest();
+  const [guestDevice, setGuestDevice] = useState<Device | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [me, overview] = await Promise.all([api.me(), api.overview()]);
-      setUser(me.user);
-      setData(overview);
+      if (isGuest()) {
+        // Guests have no account: only their own device and sessions.
+        const state = await api.guestState();
+        setGuestDevice(state.device);
+        setData({ ...empty, devices: state.device ? [state.device] : [], sessions: state.sessions });
+      } else {
+        const [me, overview] = await Promise.all([api.me(), api.overview()]);
+        setUser(me.user);
+        setData(overview);
+      }
     } catch {
       logout();
     } finally {
@@ -56,14 +79,32 @@ const Console = () => {
   }, [logout]);
 
   useEffect(() => {
-    if (!getToken()) {
+    if (!getToken() && !isGuest()) {
       navigate('/login');
       return;
     }
     load();
   }, [load, navigate]);
 
-  const { device: myDevice, password, refreshPassword } = useMyDevice(!loading, load);
+  const registered = useMyDevice(!loading && !guest, load);
+  const [guestPassword, setGuestPassword] = useState(() => localStorage.getItem('pv_guest_pass') || '');
+
+  const refreshGuestPassword = useCallback(() => {
+    const chars = 'abcdefghijkmnpqrstuvwxyz23456789';
+    const p = Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    localStorage.setItem('pv_guest_pass', p);
+    setGuestPassword(p);
+    if (guestDevice?.id) api.setDevicePassword(guestDevice.id, p).catch(() => undefined);
+    return p;
+  }, [guestDevice?.id]);
+
+  useEffect(() => {
+    if (guest && !['home', 'connect', 'files'].includes(tab)) setTab('home');
+  }, [guest, tab]);
+
+  const myDevice = guest ? guestDevice : registered.device;
+  const password = guest ? guestPassword : registered.password;
+  const refreshPassword = guest ? refreshGuestPassword : registered.refreshPassword;
   const { incoming, sharing, accept, reject, stopSharing } = useIncomingSession();
 
   useEffect(() => {
@@ -142,6 +183,7 @@ const Console = () => {
       password={password}
       onRefreshPassword={refreshPassword}
       online={data.stats.online}
+      guest={guest}
     >
       {tab === 'home' && (
         <HomeTab

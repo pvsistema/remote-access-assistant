@@ -16,6 +16,9 @@ const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: 'api', label: 'API для C#', icon: 'Code2' },
 ];
 
+// In guest mode there is no account, so account-only sections are hidden.
+const GUEST_TABS: TabKey[] = ['home', 'connect', 'files'];
+
 const ConsoleShell = ({
   user,
   tab,
@@ -25,6 +28,7 @@ const ConsoleShell = ({
   password,
   onRefreshPassword,
   online,
+  guest = false,
   children,
 }: {
   user: User | null;
@@ -35,9 +39,11 @@ const ConsoleShell = ({
   password: string;
   onRefreshPassword: () => void;
   online: number;
+  guest?: boolean;
   children: React.ReactNode;
 }) => {
   const [copied, setCopied] = useState('');
+  const visibleTabs = guest ? tabs.filter((t) => GUEST_TABS.includes(t.key)) : tabs;
 
   const copy = (value: string, key: string) => {
     navigator.clipboard?.writeText(value);
@@ -62,8 +68,12 @@ const ConsoleShell = ({
         </span>
 
         <span className="ml-auto hidden text-right text-[0.8rem] leading-tight sm:block">
-          <span className="block font-semibold">{user?.full_name || user?.email}</span>
-          <span className="block text-muted-foreground">{user?.company || 'Личный аккаунт'}</span>
+          <span className="block font-semibold">
+            {guest ? 'Быстрый сеанс' : user?.full_name || user?.email}
+          </span>
+          <span className="block text-muted-foreground">
+            {guest ? 'Без регистрации' : user?.company || 'Личный аккаунт'}
+          </span>
         </span>
         <Link
           to="/help"
@@ -137,7 +147,7 @@ const ConsoleShell = ({
           </div>
 
           <nav className="mt-7 flex flex-col gap-1">
-            {tabs.map((t) => (
+            {visibleTabs.map((t) => (
               <button
                 key={t.key}
                 type="button"

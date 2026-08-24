@@ -12,7 +12,7 @@ SCHEMA = 't_p23746347_remote_access_assist'
 CORS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token, X-Device-Uid',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token, X-Device-Uid, X-Guest-Token',
     'Access-Control-Max-Age': '86400',
     'Content-Type': 'application/json',
 }
@@ -56,6 +56,18 @@ def _session(cur, account_id: int, session_id: int) -> Optional[dict]:
         f"SELECT id, device_id, status, allow_control, allow_files, allow_clipboard "
         f"FROM {SCHEMA}.sessions WHERE id = %s AND account_id = %s",
         (session_id, account_id),
+    )
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def _guest_session(cur, guest_token: str, session_id: int) -> Optional[dict]:
+    # A guest may touch a session they started, or one aimed at their device.
+    cur.execute(
+        f"SELECT s.id, s.device_id, s.status, s.allow_control, s.allow_files, s.allow_clipboard "
+        f"FROM {SCHEMA}.sessions s WHERE s.id = %s AND (s.guest_token = %s OR s.device_id IN "
+        f"(SELECT id FROM {SCHEMA}.devices WHERE guest_token = %s))",
+        (session_id, guest_token, guest_token),
     )
     row = cur.fetchone()
     return dict(row) if row else None
@@ -108,6 +120,10 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
 
     # Two callers: the operator (browser, X-Auth-Token) and the C#-agent on the
     # remote PC (X-Device-Uid). Each may only touch its own session.
+    guest_token = (headers.get('X-Guest-Token') or headers.get('x-guest-token') or '').strip()
+    if guest_token and (len(guest_token) > 64 or not all(c in '0123456789abcdefABCDEF' for c in guest_token)):
+        return _resp(400, {'error': 'bad_guest_token'})
+
     is_agent = False
     if device_uid:
         dev = _device_auth(cur, device_uid)
@@ -116,6 +132,15 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         aid = dev['account_id']
         is_agent = True
         sess = _device_session(cur, dev['id'], session_id) if session_id else None
+    elif guest_token and not token:
+        cur.execute(
+            f"SELECT account_id FROM {SCHEMA}.devices WHERE guest_token=%s LIMIT 1", (guest_token,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return _resp(401, {'error': 'unauthorized'})
+        aid = row['account_id']
+        sess = _guest_session(cur, guest_token, session_id) if session_id else None
     else:
         user = _auth(cur, token)
         if not user:

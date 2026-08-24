@@ -12,11 +12,19 @@ import psycopg2.extras
 
 SCHEMA = 't_p23746347_remote_access_assist'
 RELAY_URL = 'wss://relay.pv-access.ru/v1'
+GUEST_EMAIL = 'guest@pv-access.local'
+
+# Actions available without registration (guest mode: ID + password only).
+GUEST_ACTIONS = {
+    'guest_register', 'guest_state', 'create_session', 'update_session',
+    'confirm_session', 'my_incoming', 'messages', 'send_message',
+    'set_device_password', 'heartbeat', 'set_offline',
+}
 
 CORS = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token, X-Device-Uid',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Auth-Token, X-Device-Uid, X-Guest-Token',
     'Access-Control-Max-Age': '86400',
     'Content-Type': 'application/json',
 }
@@ -84,10 +92,29 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     conn.autocommit = True
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+    # Guest mode: no registration, identified only by a device token.
+    guest_token = (headers.get('X-Guest-Token') or headers.get('x-guest-token') or '').strip()
+    # Tokens are generated as hex by us; reject anything else (SQL safety).
+    if guest_token and (len(guest_token) > 64 or not all(c in string.hexdigits for c in guest_token)):
+        return _resp(400, {'error': 'bad_guest_token'})
+    guest = False
     user = _auth(cur, token)
-    if not user:
+
+    # guest_register is the entry point: it works without any token yet.
+    if not user and action in GUEST_ACTIONS and (guest_token or action == 'guest_register'):
+        cur.execute(f"SELECT id FROM {SCHEMA}.accounts WHERE email=%s", (GUEST_EMAIL,))
+        row = cur.fetchone()
+        if not row:
+            return _resp(500, {'error': 'guest_account_missing'})
+        guest = True
+        aid = row['id']
+        user = {'id': aid, 'email': '', 'full_name': 'Гость', 'company': '', 'role': 'guest'}
+    elif not user:
         return _resp(401, {'error': 'unauthorized'})
-    aid = user['id']
+    else:
+        aid = user['id']
+
+
 
     if method == 'GET' and action == 'overview':
         cur.execute(
@@ -95,7 +122,8 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             f"d.unattended, d.is_online, d.last_seen, d.created_at, d.group_id, d.is_favorite, d.note, d.mac_address, "
             f"g.name AS group_name FROM {SCHEMA}.devices d "
             f"LEFT JOIN {SCHEMA}.device_groups g ON g.id = d.group_id "
-            f"WHERE d.account_id = %s ORDER BY d.is_favorite DESC, d.is_online DESC, d.name",
+            f"WHERE d.account_id = %s AND d.guest_token = '' "
+            f"ORDER BY d.is_favorite DESC, d.is_online DESC, d.name",
             (aid,),
         )
         devices = [dict(r) for r in cur.fetchall()]
@@ -227,7 +255,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         mode = (body.get('mode') or 'control')[:24]
         supplied = (body.get('password') or '').strip()
         cur.execute(
-            f"SELECT id, name, account_id, permanent_password, unattended "
+            f"SELECT id, name, account_id, permanent_password, unattended, guest_token "
             f"FROM {SCHEMA}.devices WHERE access_id=%s",
             (access_id,),
         )
@@ -236,7 +264,11 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             return _resp(404, {'error': 'device_not_found'})
 
         # A device from another account may only be accessed with its password.
-        own = dev['account_id'] == aid
+        # All guests share one service account, so they are compared by token.
+        if guest:
+            own = dev['guest_token'] == guest_token and dev['guest_token'] != ''
+        else:
+            own = dev['account_id'] == aid and not dev['guest_token']
         if not own:
             if not dev['permanent_password']:
                 return _resp(403, {'error': 'password_required'})
@@ -250,15 +282,16 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         otp = _digits(4)
         expires = datetime.utcnow() + timedelta(minutes=15)
         perms = body.get('permissions') or {}
+        operator = (body.get('operator_name') or '').strip()[:255] if guest else ''
         cur.execute(
-            f"INSERT INTO {SCHEMA}.sessions (account_id, device_id, access_id, session_code, one_time_password, "
-            f"status, mode, operator_name, relay_url, expires_at, allow_control, allow_files, allow_clipboard, "
-            f"allow_audio, is_recorded) "
-            f"VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            f"INSERT INTO {SCHEMA}.sessions (account_id, guest_token, device_id, access_id, session_code, "
+            f"one_time_password, status, mode, operator_name, relay_url, expires_at, allow_control, "
+            f"allow_files, allow_clipboard, allow_audio, is_recorded) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             f"RETURNING id, session_code, one_time_password, expires_at, status, mode, "
             f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded",
-            (aid, dev['id'], access_id, code, otp, mode,
-             user['full_name'] or user['email'], RELAY_URL, expires,
+            (aid, guest_token if guest else '', dev['id'], access_id, code, otp, mode,
+             operator or user['full_name'] or user['email'] or 'Гость', RELAY_URL, expires,
              bool(perms.get('control', mode == 'control')), bool(perms.get('files', True)),
              bool(perms.get('clipboard', True)), bool(perms.get('audio', False)),
              bool(perms.get('record', False))),
@@ -277,13 +310,23 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             return _resp(403, {'error': 'confirm_on_remote_side'})
         # Either side may end the session: the operator who started it,
         # or the owner of the controlled device.
-        cur.execute(
-            f"UPDATE {SCHEMA}.sessions s SET status=%s, ended_at=NOW() "
-            f"WHERE s.id=%s AND (s.account_id=%s OR s.device_id IN "
-            f"(SELECT id FROM {SCHEMA}.devices WHERE account_id=%s)) "
-            f"RETURNING s.id, s.device_id, s.access_id",
-            (status, session_id, aid, aid),
-        )
+        if guest:
+            cur.execute(
+                f"UPDATE {SCHEMA}.sessions s SET status=%s, ended_at=NOW() "
+                f"WHERE s.id=%s AND (s.guest_token=%s OR s.device_id IN "
+                f"(SELECT id FROM {SCHEMA}.devices WHERE guest_token=%s)) "
+                f"RETURNING s.id, s.device_id, s.access_id",
+                (status, session_id, guest_token, guest_token),
+            )
+        else:
+            cur.execute(
+                f"UPDATE {SCHEMA}.sessions s SET status=%s, ended_at=NOW() "
+                f"WHERE s.id=%s AND (s.account_id=%s OR s.device_id IN "
+                f"(SELECT id FROM {SCHEMA}.devices WHERE account_id=%s)) "
+                f"AND s.guest_token='' "
+                f"RETURNING s.id, s.device_id, s.access_id",
+                (status, session_id, aid, aid),
+            )
         row = cur.fetchone()
         if not row:
             return _resp(404, {'error': 'session_not_found'})
@@ -392,6 +435,71 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             return _resp(404, {'error': 'device_not_found'})
         return _resp(200, {'device': dict(row)})
 
+    # --- Guest mode (no registration) ---
+
+    # Creates a guest identity + device, returns ID and password to dictate.
+    if action == 'guest_register':
+        new_token = guest_token or secrets.token_hex(16)
+        device_uid = (body.get('device_uid') or '').strip()[:64] or f'guest-{new_token[:12]}'
+        name = (body.get('name') or 'Мой компьютер').strip()[:255]
+        os_name = (body.get('os') or '').strip()[:64]
+        os_version = (body.get('os_version') or '').strip()[:64]
+        app_version = (body.get('app_version') or '').strip()[:32]
+
+        cur.execute(
+            f"SELECT id, access_id FROM {SCHEMA}.devices WHERE device_uid=%s AND guest_token=%s",
+            (device_uid, new_token),
+        )
+        existing = cur.fetchone()
+        password = (body.get('password') or '').strip()
+        if len(password) < 4:
+            password = ''.join(random.choice('abcdefghijkmnpqrstuvwxyz23456789') for _ in range(6))
+
+        if existing:
+            cur.execute(
+                f"UPDATE {SCHEMA}.devices SET name=%s, os=%s, os_version=%s, app_version=%s, "
+                f"permanent_password=%s, is_online=TRUE, last_seen=NOW() WHERE id=%s "
+                f"RETURNING id, access_id, name",
+                (name, os_name, os_version, app_version, _make_pwd(password), existing['id']),
+            )
+        else:
+            cur.execute(
+                f"INSERT INTO {SCHEMA}.devices (account_id, guest_token, device_uid, access_id, name, os, "
+                f"os_version, app_version, permanent_password, is_online, last_seen) "
+                f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,NOW()) RETURNING id, access_id, name",
+                (aid, new_token, device_uid, _digits(9), name, os_name, os_version,
+                 app_version, _make_pwd(password)),
+            )
+        dev = dict(cur.fetchone())
+        return _resp(200, {
+            'guest_token': new_token,
+            'device': dev,
+            'password': password,
+        })
+
+    # Current guest state: my device + my incoming/outgoing sessions.
+    if action == 'guest_state':
+        cur.execute(
+            f"SELECT id, device_uid, access_id, name, os, os_version, app_version, is_online, last_seen "
+            f"FROM {SCHEMA}.devices WHERE guest_token=%s ORDER BY id LIMIT 1",
+            (guest_token,),
+        )
+        row = cur.fetchone()
+        device = dict(row) if row else None
+        sessions = []
+        if device:
+            cur.execute(
+                f"SELECT s.id, s.access_id, s.session_code, s.status, s.mode, s.operator_name, "
+                f"s.created_at, s.expires_at, s.allow_control, s.allow_files, s.allow_clipboard, "
+                f"s.allow_audio, s.is_recorded, s.guest_token "
+                f"FROM {SCHEMA}.sessions s "
+                f"WHERE (s.device_id=%s OR s.guest_token=%s) AND s.expires_at > NOW() "
+                f"AND s.status IN ('pending','active') ORDER BY s.created_at DESC LIMIT 10",
+                (device['id'], guest_token),
+            )
+            sessions = [dict(r) for r in cur.fetchall()]
+        return _resp(200, {'device': device, 'sessions': sessions})
+
     # --- Consent on the controlled side ---
 
     # Sessions requested BY OTHERS to devices owned by this account.
@@ -401,9 +509,10 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             f"s.created_at, s.expires_at, s.allow_control, s.allow_files, s.allow_clipboard, "
             f"s.allow_audio, s.is_recorded, d.device_uid, d.name AS device_name "
             f"FROM {SCHEMA}.sessions s JOIN {SCHEMA}.devices d ON d.id = s.device_id "
-            f"WHERE d.account_id=%s AND s.status IN ('pending','active') AND s.expires_at > NOW() "
+            + ("WHERE d.guest_token=%s " if guest else "WHERE d.account_id=%s AND d.guest_token='' ")
+            + f"AND s.status IN ('pending','active') AND s.expires_at > NOW() "
             f"ORDER BY s.created_at DESC LIMIT 10",
-            (aid,),
+            (guest_token if guest else aid,),
         )
         return _resp(200, {'sessions': [dict(r) for r in cur.fetchall()]})
 
@@ -412,9 +521,10 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         cur.execute(
             f"UPDATE {SCHEMA}.sessions s SET status='active', started_at=NOW() "
             f"WHERE s.id=%s AND s.status='pending' AND s.expires_at > NOW() "
-            f"AND s.device_id IN (SELECT id FROM {SCHEMA}.devices WHERE account_id=%s) "
-            f"RETURNING s.id, s.device_id, s.access_id",
-            (body.get('session_id'), aid),
+            f"AND s.device_id IN (SELECT id FROM {SCHEMA}.devices WHERE "
+            + ("guest_token=%s" if guest else "account_id=%s AND guest_token=''")
+            + ") RETURNING s.id, s.device_id, s.access_id",
+            (body.get('session_id'), guest_token if guest else aid),
         )
         row = cur.fetchone()
         if not row:

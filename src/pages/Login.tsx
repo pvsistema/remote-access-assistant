@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
-import { api, setToken, ERRORS } from '@/lib/api';
+import { api, setToken, setGuestToken, ERRORS } from '@/lib/api';
+import { browserName, osName } from '@/hooks/useMyDevice';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -13,6 +14,26 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  // Guest mode: get an ID and a password right away, no account needed.
+  const enterAsGuest = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await api.guestRegister({
+        name: `${browserName()} · ${osName()}`,
+        os: osName(),
+        os_version: browserName(),
+      });
+      setGuestToken(res.guest_token);
+      localStorage.setItem('pv_guest_pass', res.password);
+      navigate(presetId ? `/console?id=${presetId}` : '/console');
+    } catch {
+      setError('Не удалось начать быстрый сеанс. Попробуйте ещё раз.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,7 +121,26 @@ const Login = () => {
             </button>
           </form>
 
-          <p className="mt-6 text-[0.92rem] text-muted-foreground">
+          <div className="mt-7 flex items-center gap-3">
+            <span className="h-px flex-1 bg-border" />
+            <span className="text-[0.82rem] text-muted-foreground">или</span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
+          <button
+            type="button"
+            onClick={enterAsGuest}
+            disabled={loading}
+            className="mt-5 inline-flex w-full items-center justify-center gap-2.5 rounded-pill border-2 border-primary px-8 py-[15px] text-[0.98rem] font-semibold leading-none text-primary transition-colors hover:bg-primary/5 disabled:opacity-60"
+          >
+            <Icon name="Zap" size={18} />
+            Быстрый сеанс без регистрации
+          </button>
+          <p className="mt-2.5 text-center text-[0.85rem] text-muted-foreground">
+            Сразу получите свой ID и пароль — как в Ассистенте
+          </p>
+
+          <p className="mt-7 text-[0.92rem] text-muted-foreground">
             {mode === 'login' ? 'Ещё нет аккаунта? ' : 'Уже зарегистрированы? '}
             <button
               type="button"
