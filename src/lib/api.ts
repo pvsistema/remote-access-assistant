@@ -94,12 +94,21 @@ export type Session = {
   expires_at: string;
   one_time_password?: string;
   relay_url?: string;
+  relay_ticket?: string;
   device_name?: string | null;
   allow_control?: boolean;
   allow_files?: boolean;
   allow_clipboard?: boolean;
   allow_audio?: boolean;
   is_recorded?: boolean;
+};
+
+export type RelayServer = {
+  url: string;
+  enabled: boolean;
+  last_ok_at: string | null;
+  last_status: string;
+  updated_at: string;
 };
 
 export type LogItem = {
@@ -154,6 +163,21 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ access_id, mode, permissions, password }),
     }),
+  getRelay: () =>
+    request<{ relay: RelayServer | null }>(`${AGENT_URL}?action=get_relay`, {
+      method: 'POST',
+      body: '{}',
+    }),
+  saveRelay: (payload: { url: string; secret?: string; enabled?: boolean }) =>
+    request<{ ok: boolean; relay: { url: string; enabled: boolean } }>(
+      `${AGENT_URL}?action=save_relay`,
+      { method: 'POST', body: JSON.stringify(payload) },
+    ),
+  checkRelay: (url?: string) =>
+    request<{ status: string; detail: string; checked: string }>(`${AGENT_URL}?action=check_relay`, {
+      method: 'POST',
+      body: JSON.stringify(url ? { url } : {}),
+    }),
   guestRegister: (payload: { name?: string; os?: string; os_version?: string; device_uid?: string }) =>
     request<{ guest_token: string; device: Device; password: string }>(
       `${AGENT_URL}?action=guest_register`,
@@ -170,10 +194,10 @@ export const api = {
       body: '{}',
     }),
   confirmSession: (session_id: number) =>
-    request<{ ok: boolean }>(`${AGENT_URL}?action=confirm_session`, {
-      method: 'POST',
-      body: JSON.stringify({ session_id }),
-    }),
+    request<{ ok: boolean; relay_url?: string; relay_ticket?: string }>(
+      `${AGENT_URL}?action=confirm_session`,
+      { method: 'POST', body: JSON.stringify({ session_id }) },
+    ),
   setDevicePassword: (device_id: number, password: string) =>
     request<{ ok: boolean }>(`${AGENT_URL}?action=set_device_password`, {
       method: 'POST',
@@ -279,8 +303,10 @@ export type Frame = {
   monitor: number;
   width: number;
   height: number;
-  image_b64: string;
-  updated_at: string;
+  // Cloud polling delivers base64; the relay delivers a ready object URL.
+  image_b64?: string;
+  image_url?: string;
+  updated_at?: string;
 };
 
 export const ERRORS: Record<string, string> = {

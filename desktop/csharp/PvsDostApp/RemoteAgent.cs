@@ -3,7 +3,9 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net.Http;
+using System.Net.WebSockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -23,25 +25,105 @@ public sealed class RemoteAgent : IDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private readonly int _sessionId;
     private readonly bool _allowFiles;
+
+    // Own relay server (optional). When connected, frames and commands go
+    // through it directly; otherwise everything falls back to cloud polling.
+    private readonly string _relayUrl;
+    private readonly string _relayTicket;
+    private ClientWebSocket? _relay;
+    private volatile bool _relayLive;
+
     private CancellationTokenSource? _cts;
 
     private int _monitor = 1;
     private long _clipSeq = -1;
     private string _lastClipboard = "";
+    private string _lastFrameHash = "";
 
-    public RemoteAgent(int sessionId, string deviceUid, bool allowFiles = true)
+    public RemoteAgent(int sessionId, string deviceUid, bool allowFiles = true,
+        string relayUrl = "", string relayTicket = "")
     {
         _sessionId = sessionId;
         _allowFiles = allowFiles;
+        _relayUrl = relayUrl ?? "";
+        _relayTicket = relayTicket ?? "";
         _http.DefaultRequestHeaders.Add("X-Device-Uid", deviceUid);
     }
 
     public void Start()
     {
         _cts = new CancellationTokenSource();
+        if (_relayUrl.Length > 0 && _relayTicket.Length > 0)
+            _ = Task.Run(() => RelayLoopAsync(_cts.Token));
         _ = Task.Run(() => CaptureLoopAsync(_cts.Token));
         _ = Task.Run(() => CommandLoopAsync(_cts.Token));
         _ = Task.Run(() => ClipboardLoopAsync(_cts.Token));
+    }
+
+    // ---------- relay channel ----------
+
+    private async Task RelayLoopAsync(CancellationToken ct)
+    {
+        int attempt = 0;
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var ws = new ClientWebSocket();
+                var uri = new Uri($"{_relayUrl}?ticket={Uri.EscapeDataString(_relayTicket)}");
+                await ws.ConnectAsync(uri, ct);
+                _relay = ws;
+                _relayLive = true;
+                attempt = 0;
+
+                var buffer = new byte[64 * 1024];
+                while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
+                {
+                    using var ms = new MemoryStream();
+                    WebSocketReceiveResult res;
+                    do
+                    {
+                        res = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+                        if (res.MessageType == WebSocketMessageType.Close) break;
+                        ms.Write(buffer, 0, res.Count);
+                    } while (!res.EndOfMessage);
+
+                    if (res.MessageType == WebSocketMessageType.Close) break;
+                    if (ms.Length == 0) continue;
+
+                    // Operator commands arrive as JSON, same shape as the cloud ones.
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(ms.ToArray());
+                        if (doc.RootElement.TryGetProperty("kind", out _)) Apply(doc.RootElement);
+                    }
+                    catch { /* service message, ignore */ }
+                }
+            }
+            catch { /* reconnect below */ }
+
+            _relayLive = false;
+            _relay = null;
+            if (ct.IsCancellationRequested) break;
+            attempt = Math.Min(attempt + 1, 5);
+            try { await Task.Delay(1000 * attempt, ct); } catch { break; }
+        }
+    }
+
+    private async Task<bool> RelaySendFrameAsync(byte[] jpeg, CancellationToken ct)
+    {
+        var ws = _relay;
+        if (!_relayLive || ws is null || ws.State != WebSocketState.Open) return false;
+        try
+        {
+            await ws.SendAsync(new ArraySegment<byte>(jpeg), WebSocketMessageType.Binary, true, ct);
+            return true;
+        }
+        catch
+        {
+            _relayLive = false;
+            return false;
+        }
     }
 
     public void Stop() => _cts?.Cancel();
@@ -49,6 +131,9 @@ public sealed class RemoteAgent : IDisposable
     public void Dispose()
     {
         Stop();
+        try { _relay?.Abort(); _relay?.Dispose(); } catch { /* already gone */ }
+        _relay = null;
+        _relayLive = false;
         _http.Dispose();
         _cts?.Dispose();
     }
@@ -69,21 +154,36 @@ public sealed class RemoteAgent : IDisposable
     {
         while (!ct.IsCancellationRequested)
         {
+            bool viaRelay = _relayLive;
             try
             {
                 var jpeg = CaptureScreen(out int w, out int h);
-                await PostAsync("push_frame", new
+
+                // Skip identical frames — a still desktop costs no traffic.
+                var hash = Convert.ToBase64String(MD5.HashData(jpeg));
+                bool same = hash == _lastFrameHash;
+                _lastFrameHash = hash;
+
+                if (!same)
                 {
-                    session_id = _sessionId,
-                    monitor = _monitor,
-                    width = w,
-                    height = h,
-                    image_b64 = Convert.ToBase64String(jpeg),
-                }, ct);
+                    if (!await RelaySendFrameAsync(jpeg, ct))
+                    {
+                        viaRelay = false;
+                        await PostAsync("push_frame", new
+                        {
+                            session_id = _sessionId,
+                            monitor = _monitor,
+                            width = w,
+                            height = h,
+                            image_b64 = Convert.ToBase64String(jpeg),
+                        }, ct);
+                    }
+                }
             }
             catch { /* keep streaming on next tick */ }
 
-            try { await Task.Delay(280, ct); } catch { break; }
+            // The relay carries frames far cheaper, so capture more often.
+            try { await Task.Delay(viaRelay ? 60 : 280, ct); } catch { break; }
         }
     }
 
@@ -148,6 +248,12 @@ public sealed class RemoteAgent : IDisposable
     {
         while (!ct.IsCancellationRequested)
         {
+            // While the relay is live it delivers commands instantly.
+            if (_relayLive)
+            {
+                try { await Task.Delay(250, ct); } catch { break; }
+                continue;
+            }
             try
             {
                 var url = $"{StreamUrl}?action=commands&session_id={_sessionId}";

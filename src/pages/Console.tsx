@@ -8,6 +8,7 @@ import HomeTab from '@/components/console/HomeTab';
 import FilesTab from '@/components/console/FilesTab';
 import TeamTab from '@/components/console/TeamTab';
 import LogTab from '@/components/console/LogTab';
+import ServerTab from '@/components/console/ServerTab';
 import ApiTab from '@/components/console/ApiTab';
 import RemoteScreen from '@/components/console/RemoteScreen';
 import { IncomingSessionPrompt, SharingBar } from '@/components/console/IncomingSessionPrompt';
@@ -211,6 +212,7 @@ const Console = () => {
       {tab === 'files' && <FilesTab files={data.files} />}
       {tab === 'team' && <TeamTab team={data.team} onRefresh={load} />}
       {tab === 'log' && <LogTab logs={data.logs} />}
+      {tab === 'server' && <ServerTab />}
       {tab === 'api' && <ApiTab />}
     </ConsoleShell>
     </>

@@ -4,7 +4,7 @@ import Icon from '@/components/ui/icon';
 import { toast } from '@/hooks/use-toast';
 import type { Device, User } from '@/lib/api';
 
-export type TabKey = 'home' | 'devices' | 'connect' | 'files' | 'team' | 'log' | 'api';
+export type TabKey = 'home' | 'devices' | 'connect' | 'files' | 'team' | 'log' | 'server' | 'api';
 
 const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: 'home', label: 'Главная', icon: 'House' },
@@ -13,6 +13,7 @@ const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: 'files', label: 'Файлы', icon: 'FolderSync' },
   { key: 'team', label: 'Команда', icon: 'Users' },
   { key: 'log', label: 'Журнал', icon: 'ScrollText' },
+  { key: 'server', label: 'Свой сервер', icon: 'Server' },
   { key: 'api', label: 'API для C#', icon: 'Code2' },
 ];
 

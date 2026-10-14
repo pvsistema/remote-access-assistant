@@ -209,7 +209,8 @@ public sealed class MainForm : Form
     }
 
     // Remote-side control: the web UI starts/stops desktop sharing for a session.
-    // Format: "agent:start:{sessionId}:{deviceUid}:{allowFiles}" | "agent:stop"
+    // "agent:stop" | "agent:start:{json}" where json =
+    // {"session":1,"uid":"...","files":true,"relay":"wss://...","ticket":"..."}
     private void HandleAgentCommand(string cmd)
     {
         if (cmd == "agent:stop")
@@ -218,18 +219,37 @@ public sealed class MainForm : Form
             _agent = null;
             return;
         }
-        if (cmd.StartsWith("agent:start:", StringComparison.Ordinal))
-        {
-            var parts = cmd.Split(':');
-            if (parts.Length < 4) return;
-            if (!int.TryParse(parts[2], out int sessionId)) return;
-            var deviceUid = parts[3];
-            bool allowFiles = parts.Length < 5 || parts[4] != "0";
+        if (!cmd.StartsWith("agent:start:", StringComparison.Ordinal)) return;
 
-            _agent?.Dispose();
-            _agent = new RemoteAgent(sessionId, deviceUid, allowFiles);
-            _agent.Start();
+        var raw = cmd.Substring("agent:start:".Length);
+        int sessionId;
+        string deviceUid, relay = "", ticket = "";
+        bool allowFiles = true;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var r = doc.RootElement;
+            sessionId = r.GetProperty("session").GetInt32();
+            deviceUid = r.GetProperty("uid").GetString() ?? "";
+            if (r.TryGetProperty("files", out var f)) allowFiles = f.ValueKind != JsonValueKind.False;
+            if (r.TryGetProperty("relay", out var rl)) relay = rl.GetString() ?? "";
+            if (r.TryGetProperty("ticket", out var tk)) ticket = tk.GetString() ?? "";
         }
+        catch
+        {
+            // Older format: agent:start:{sessionId}:{deviceUid}:{allowFiles}
+            var parts = raw.Split(':');
+            if (parts.Length < 2 || !int.TryParse(parts[0], out sessionId)) return;
+            deviceUid = parts[1];
+            allowFiles = parts.Length < 3 || parts[2] != "0";
+        }
+
+        if (sessionId <= 0 || deviceUid.Length == 0) return;
+
+        _agent?.Dispose();
+        _agent = new RemoteAgent(sessionId, deviceUid, allowFiles, relay, ticket);
+        _agent.Start();
     }
 
     private static void OpenExternal(string uri)

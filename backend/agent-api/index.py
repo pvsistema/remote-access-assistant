@@ -1,9 +1,14 @@
+import base64
 import hashlib
+import hmac
 import json
 import os
 import random
 import secrets
 import string
+import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
@@ -11,7 +16,43 @@ import psycopg2
 import psycopg2.extras
 
 SCHEMA = 't_p23746347_remote_access_assist'
-RELAY_URL = 'wss://relay.pv-access.ru/v1'
+# Own relay server (own VPS) is configured per account; empty = cloud polling only.
+TICKET_TTL = 6 * 60 * 60
+
+
+def _relay(cur, account_id: int) -> Optional[dict]:
+    cur.execute(
+        f"SELECT url, secret, enabled FROM {SCHEMA}.relay_servers WHERE account_id=%s",
+        (account_id,),
+    )
+    row = cur.fetchone()
+    if not row or not row['enabled'] or not row['url'] or not row['secret']:
+        return None
+    return dict(row)
+
+
+def _relay_ticket(secret: str, session_id: int, role: str, control: bool) -> str:
+    """Короткий подписанный пропуск: ретранслятор проверяет его без базы."""
+    payload = json.dumps({
+        'sid': session_id,
+        'role': role,
+        'control': bool(control),
+        'exp': time.time() + TICKET_TTL,
+    }, separators=(',', ':')).encode()
+    p = base64.urlsafe_b64encode(payload).rstrip(b'=').decode()
+    sig = hmac.new(secret.encode(), p.encode(), hashlib.sha256).digest()
+    return f"{p}.{base64.urlsafe_b64encode(sig).rstrip(b'=').decode()}"
+
+
+def _relay_info(cur, account_id: int, session_id: int, role: str, control: bool) -> dict:
+    """Данные для подключения к своему серверу; пусто — работаем через облако."""
+    srv = _relay(cur, account_id)
+    if not srv:
+        return {'relay_url': '', 'relay_ticket': ''}
+    return {
+        'relay_url': srv['url'],
+        'relay_ticket': _relay_ticket(srv['secret'], session_id, role, control),
+    }
 GUEST_EMAIL = 'guest@pv-access.local'
 
 # Actions available without registration (guest mode: ID + password only).
@@ -171,7 +212,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             'sessions': sessions,
             'logs': logs,
             'stats': {'devices': len(devices), 'online': online, 'sessions_30d': month},
-            'relay_url': RELAY_URL,
+            'relay': {'configured': bool(_relay(cur, aid))},
         })
 
     if method == 'GET' and action == 'messages':
@@ -222,7 +263,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
                 (_make_pwd(supplied_pwd), dev['id']),
             )
         _log(cur, aid, 'device_register', f"Устройство «{dev['name']}» подключено к аккаунту", dev['id'], None, ip)
-        return _resp(200, {'device': dev, 'relay_url': RELAY_URL})
+        return _resp(200, {'device': dev, 'relay_configured': bool(_relay(cur, aid))})
 
     if action == 'heartbeat':
         device_uid = (body.get('device_uid') or '').strip()
@@ -240,7 +281,11 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             (row['id'],),
         )
         pending = cur.fetchone()
-        return _resp(200, {'ok': True, 'pending_session': dict(pending) if pending else None})
+        return _resp(200, {
+            'ok': True,
+            'pending_session': dict(pending) if pending else None,
+            'relay_configured': bool(_relay(cur, aid)),
+        })
 
     if action == 'set_offline':
         device_uid = (body.get('device_uid') or '').strip()
@@ -283,6 +328,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         expires = datetime.utcnow() + timedelta(minutes=15)
         perms = body.get('permissions') or {}
         operator = (body.get('operator_name') or '').strip()[:255] if guest else ''
+        # Both sides must meet on the SAME relay — the one of the remote PC owner.
+        srv = _relay(cur, dev['account_id'])
+        relay_url = srv['url'] if srv else ''
         cur.execute(
             f"INSERT INTO {SCHEMA}.sessions (account_id, guest_token, device_id, access_id, session_code, "
             f"one_time_password, status, mode, operator_name, relay_url, expires_at, allow_control, "
@@ -291,14 +339,17 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             f"RETURNING id, session_code, one_time_password, expires_at, status, mode, "
             f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded",
             (aid, guest_token if guest else '', dev['id'], access_id, code, otp, mode,
-             operator or user['full_name'] or user['email'] or 'Гость', RELAY_URL, expires,
+             operator or user['full_name'] or user['email'] or 'Гость', relay_url, expires,
              bool(perms.get('control', mode == 'control')), bool(perms.get('files', True)),
              bool(perms.get('clipboard', True)), bool(perms.get('audio', False)),
              bool(perms.get('record', False))),
         )
         sess = dict(cur.fetchone())
         _log(cur, aid, 'session_create', f'Создан сеанс к ID {access_id}', dev['id'], sess['id'], ip)
-        sess['relay_url'] = RELAY_URL
+        sess['relay_url'] = relay_url
+        sess['relay_ticket'] = (
+            _relay_ticket(srv['secret'], sess['id'], 'operator', sess['allow_control']) if srv else ''
+        )
         sess['device_name'] = dev['name']
         return _resp(200, {'session': sess})
 
@@ -435,6 +486,82 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             return _resp(404, {'error': 'device_not_found'})
         return _resp(200, {'device': dict(row)})
 
+    # --- Own relay server (e.g. a Beget VPS) ---
+
+    if action == 'get_relay':
+        if guest:
+            return _resp(403, {'error': 'account_required'})
+        cur.execute(
+            f"SELECT url, enabled, last_ok_at, last_status, updated_at FROM {SCHEMA}.relay_servers "
+            f"WHERE account_id=%s",
+            (aid,),
+        )
+        row = cur.fetchone()
+        return _resp(200, {'relay': dict(row) if row else None})
+
+    if action == 'save_relay':
+        if guest:
+            return _resp(403, {'error': 'account_required'})
+        url = (body.get('url') or '').strip()[:255]
+        secret_value = (body.get('secret') or '').strip()[:128]
+        enabled = bool(body.get('enabled', True))
+
+        if url and not (url.startswith('wss://') or url.startswith('ws://')):
+            return _resp(400, {'error': 'bad_relay_url'})
+        if url and not secret_value:
+            cur.execute(f"SELECT secret FROM {SCHEMA}.relay_servers WHERE account_id=%s", (aid,))
+            old = cur.fetchone()
+            secret_value = old['secret'] if old else ''
+            if not secret_value:
+                return _resp(400, {'error': 'secret_required'})
+
+        cur.execute(
+            f"INSERT INTO {SCHEMA}.relay_servers (account_id, url, secret, enabled, updated_at) "
+            f"VALUES (%s,%s,%s,%s,NOW()) ON CONFLICT (account_id) DO UPDATE SET "
+            f"url=EXCLUDED.url, secret=EXCLUDED.secret, enabled=EXCLUDED.enabled, updated_at=NOW() "
+            f"RETURNING url, enabled",
+            (aid, url, secret_value, enabled),
+        )
+        saved = dict(cur.fetchone())
+        _log(cur, aid, 'relay_save', f"Свой сервер связи: {url or 'отключён'}", None, None, ip)
+        return _resp(200, {'ok': True, 'relay': saved})
+
+    # Checks that the relay server is alive and reachable.
+    if action == 'check_relay':
+        if guest:
+            return _resp(403, {'error': 'account_required'})
+        cur.execute(f"SELECT url FROM {SCHEMA}.relay_servers WHERE account_id=%s", (aid,))
+        row = cur.fetchone()
+        url = (body.get('url') or (row['url'] if row else '') or '').strip()
+        if not url:
+            return _resp(400, {'error': 'url_required'})
+
+        health = url.replace('wss://', 'https://').replace('ws://', 'http://')
+        if health.endswith('/ws'):
+            health = health[:-3]
+        health = health.rstrip('/') + '/health'
+
+        status, detail = 'error', ''
+        try:
+            with urllib.request.urlopen(health, timeout=4) as r:
+                data = json.loads(r.read().decode()[:2000])
+                if data.get('service') == 'pv-relay':
+                    status = 'ok'
+                    detail = f"версия {data.get('version', '?')}, сеансов: {data.get('sessions', 0)}"
+                else:
+                    detail = 'по этому адресу отвечает другая программа'
+        except urllib.error.HTTPError as e:
+            detail = f'сервер ответил кодом {e.code}'
+        except Exception:
+            detail = 'сервер не отвечает'
+
+        cur.execute(
+            f"UPDATE {SCHEMA}.relay_servers SET last_status=%s, "
+            f"last_ok_at=CASE WHEN %s THEN NOW() ELSE last_ok_at END WHERE account_id=%s",
+            (detail[:255], status == 'ok', aid),
+        )
+        return _resp(200, {'status': status, 'detail': detail, 'checked': health})
+
     # --- Guest mode (no registration) ---
 
     # Creates a guest identity + device, returns ID and password to dictate.
@@ -531,7 +658,12 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             return _resp(404, {'error': 'session_not_found'})
         _log(cur, aid, 'session_active', f"Сеанс подтверждён · ID {row['access_id']}",
              row['device_id'], row['id'], ip)
-        return _resp(200, {'ok': True, 'status': 'active'})
+        # The controlled side joins the relay as the "agent" role.
+        return _resp(200, {
+            'ok': True,
+            'status': 'active',
+            **_relay_info(cur, aid, row['id'], 'agent', True),
+        })
 
     # Owner sets/updates the permanent access password of their device.
     if action == 'set_device_password':

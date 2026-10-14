@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, getToken, type Session } from '@/lib/api';
+import { api, getToken, isGuest, type Session } from '@/lib/api';
 
 type Host = { chrome?: { webview?: { postMessage: (m: unknown) => void } } };
 
 const deviceUid = () => localStorage.getItem('pv_device_uid') || '';
 
-const startAgent = (session: Session) => {
+// Passes the relay address and pass to the C# host, so the desktop is streamed
+// through the user's own server when one is configured.
+const startAgent = (session: Session, relay = '', ticket = '') => {
   const wv = (window as unknown as Host).chrome?.webview;
   if (!wv) return; // outside the desktop host there is nothing to capture
-  const files = session.allow_files ? '1' : '0';
-  wv.postMessage(`agent:start:${session.id}:${deviceUid()}:${files}`);
+  wv.postMessage(
+    `agent:start:${JSON.stringify({
+      session: session.id,
+      uid: deviceUid(),
+      files: Boolean(session.allow_files),
+      relay,
+      ticket,
+    })}`,
+  );
 };
 
 const stopAgent = () => {
@@ -46,14 +55,15 @@ export function useIncomingSession() {
     };
     tick();
     const id = setInterval(() => {
-      if (getToken()) tick();
+      if (getToken() || isGuest()) tick();
     }, 3000);
     return () => clearInterval(id);
   }, [sharing]);
 
   const accept = useCallback(async (session: Session) => {
-    await api.confirmSession(session.id);
-    startAgent(session);
+    // The confirm response carries the relay address and a pass for this side.
+    const res = await api.confirmSession(session.id);
+    startAgent(session, res.relay_url || '', res.relay_ticket || '');
     setSharing(session);
     setIncoming(null);
   }, []);

@@ -50,10 +50,12 @@ const RemoteScreen = ({
 
   const active = session.status !== 'pending';
   const canControl = Boolean(session.allow_control) && controlOn;
-  const { frame, connected, remoteClipboard, enqueue, sendNow, pushClipboard } = useRemoteStream(
+  const { frame, connected, remoteClipboard, enqueue, sendNow, pushClipboard, live } = useRemoteStream(
     session.id,
     active,
     canControl,
+    session.relay_url || '',
+    session.relay_ticket || '',
   );
 
   useEffect(() => {
@@ -321,7 +323,7 @@ const RemoteScreen = ({
 
           {active && frame ? (
             <img
-              src={`data:image/jpeg;base64,${frame.image_b64}`}
+              src={frame.image_url || `data:image/jpeg;base64,${frame.image_b64}`}
               alt="Экран удалённого компьютера"
               draggable={false}
               className="max-h-full max-w-full select-none object-contain"
@@ -497,6 +499,10 @@ const RemoteScreen = ({
             : connected
               ? 'Соединение установлено'
               : 'Получение изображения…'}
+        </span>
+        <span className="hidden items-center gap-1.5 sm:inline-flex">
+          <Icon name={live ? 'Zap' : 'Cloud'} size={13} className={live ? 'text-emerald-400' : ''} />
+          {live ? 'Свой сервер' : 'Через облако'}
         </span>
         <span className="hidden sm:inline">Монитор {monitor}</span>
         <span className="hidden sm:inline">
