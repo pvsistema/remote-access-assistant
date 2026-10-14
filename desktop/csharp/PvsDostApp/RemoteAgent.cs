@@ -36,7 +36,7 @@ public sealed class RemoteAgent : IDisposable
     private CancellationTokenSource? _cts;
 
     private int _monitor = 1;
-    private long _clipSeq = -1;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private string _lastClipboard = "";
     private string _lastFrameHash = "";
 
@@ -110,19 +110,29 @@ public sealed class RemoteAgent : IDisposable
         }
     }
 
-    private async Task<bool> RelaySendFrameAsync(byte[] jpeg, CancellationToken ct)
+    private Task<bool> RelaySendFrameAsync(byte[] jpeg, CancellationToken ct) =>
+        RelaySendAsync(jpeg, WebSocketMessageType.Binary, ct);
+
+    // ClientWebSocket allows only one send at a time; frames and clipboard
+    // come from different loops, so sends are serialised.
+    private async Task<bool> RelaySendAsync(byte[] data, WebSocketMessageType type, CancellationToken ct)
     {
         var ws = _relay;
         if (!_relayLive || ws is null || ws.State != WebSocketState.Open) return false;
+        await _sendLock.WaitAsync(ct);
         try
         {
-            await ws.SendAsync(new ArraySegment<byte>(jpeg), WebSocketMessageType.Binary, true, ct);
+            await ws.SendAsync(new ArraySegment<byte>(data), type, true, ct);
             return true;
         }
         catch
         {
             _relayLive = false;
             return false;
+        }
+        finally
+        {
+            _sendLock.Release();
         }
     }
 
@@ -213,7 +223,7 @@ public sealed class RemoteAgent : IDisposable
 
         var codec = GetJpegCodec();
         using var ep = new EncoderParameters(1);
-        ep.Param[0] = new EncoderParameter(Encoder.Quality, 55L);
+        ep.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 55L);
         using var ms = new MemoryStream();
         send.Save(ms, codec, ep);
         if (!ReferenceEquals(send, bmp)) send.Dispose();
@@ -366,7 +376,10 @@ public sealed class RemoteAgent : IDisposable
                 if (!string.IsNullOrEmpty(current) && current != _lastClipboard)
                 {
                     _lastClipboard = current;
-                    await PostAsync("set_clipboard", new { session_id = _sessionId, text = current, side = "client" }, ct);
+                    // Through the relay when live: the operator does not poll the cloud then.
+                    var msg = JsonSerializer.Serialize(new { kind = "clipboard", payload = new { text = current } });
+                    if (!await RelaySendAsync(Encoding.UTF8.GetBytes(msg), WebSocketMessageType.Text, ct))
+                        await PostAsync("set_clipboard", new { session_id = _sessionId, text = current, side = "client" }, ct);
                 }
             }
             catch { /* ignore */ }
