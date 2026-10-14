@@ -13,6 +13,27 @@ die() { echo -e "\033[1;31mОшибка: $*\033[0m" >&2; exit 1; }
 [ "$(id -u)" = "0" ] || die "запустите от root (sudo bash install.sh ваш-домен.ru)"
 [ -n "$DOMAIN" ] || die "укажите домен: bash install.sh relay.example.ru"
 
+# Другой веб-сервер (не nginx) на 80 порту — не трогаем его, выходим.
+if command -v ss >/dev/null 2>&1; then
+  BUSY80="$(ss -ltnpH 'sport = :80' 2>/dev/null || true)"
+  if [ -n "$BUSY80" ] && ! echo "$BUSY80" | grep -q nginx; then
+    die "порт 80 занят другой программой (не nginx). Установка остановлена, чтобы ничего не сломать:
+$BUSY80"
+  fi
+  if ss -ltnH "sport = :$PORT" 2>/dev/null | grep -q . && ! systemctl is-active -q pv-relay; then
+    die "порт $PORT уже занят. Запустите так: RELAY_PORT=8766 bash install.sh $DOMAIN"
+  fi
+fi
+if [ -d /etc/nginx/sites-enabled ]; then
+  for f in /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf; do
+    [ -f "$f" ] || continue
+    [ "$(basename "$f")" = "pv-relay" ] && continue
+    if grep -Eq "server_name[^;]*[[:space:]]$DOMAIN[[:space:];]" "$f"; then
+      die "домен $DOMAIN уже используется в $f. Возьмите отдельный поддомен, например relay.ваш-домен.ru"
+    fi
+  done
+fi
+
 say "Устанавливаю системные пакеты"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -88,9 +109,14 @@ server {
     }
 }
 EOF
+# Другие сайты сервера (в т.ч. стандартный default) не трогаем —
+# добавляем только свой отдельный блок для домена $DOMAIN.
 ln -sf /etc/nginx/sites-available/pv-relay /etc/nginx/sites-enabled/pv-relay
-rm -f /etc/nginx/sites-enabled/default
-nginx -t >/dev/null 2>&1 || die "конфигурация nginx не прошла проверку"
+if ! nginx -t >/dev/null 2>&1; then
+  rm -f /etc/nginx/sites-enabled/pv-relay
+  nginx -t 2>&1 | tail -5
+  die "конфигурация nginx не прошла проверку — мой блок убран, остальные сайты не затронуты"
+fi
 systemctl reload nginx
 
 say "Выпускаю SSL-сертификат"
