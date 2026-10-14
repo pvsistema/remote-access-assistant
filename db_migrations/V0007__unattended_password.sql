@@ -1,0 +1,2 @@
+ALTER TABLE t_p23746347_remote_access_assist.devices ADD COLUMN IF NOT EXISTS unattended_password VARCHAR(128) NOT NULL DEFAULT '';
+ALTER TABLE t_p23746347_remote_access_assist.sessions ADD COLUMN IF NOT EXISTS auto_approved BOOLEAN NOT NULL DEFAULT FALSE;

@@ -102,6 +102,7 @@ export type Session = {
   allow_clipboard?: boolean;
   allow_audio?: boolean;
   is_recorded?: boolean;
+  auto_approved?: boolean;
 };
 
 export type RelayServer = {
@@ -199,6 +200,16 @@ export const api = {
       `${AGENT_URL}?action=confirm_session`,
       { method: 'POST', body: JSON.stringify({ session_id }) },
     ),
+  unattendedStatus: (device_id: number) =>
+    request<{ enabled: boolean }>(`${AGENT_URL}?action=unattended_status`, {
+      method: 'POST',
+      body: JSON.stringify({ device_id }),
+    }),
+  setUnattended: (device_id: number, password: string) =>
+    request<{ ok: boolean; enabled: boolean }>(`${AGENT_URL}?action=set_unattended`, {
+      method: 'POST',
+      body: JSON.stringify({ device_id, password }),
+    }),
   setDevicePassword: (device_id: number, password: string) =>
     request<{ ok: boolean }>(`${AGENT_URL}?action=set_device_password`, {
       method: 'POST',
@@ -320,6 +331,6 @@ export const ERRORS: Record<string, string> = {
   request_failed: 'Не удалось выполнить запрос',
   password_required: 'Введите пароль удалённого компьютера',
   bad_device_password: 'Неверный пароль удалённого компьютера',
-  password_too_short: 'Пароль должен быть не короче 4 символов',
+  password_too_short: 'Пароль слишком короткий',
   confirm_on_remote_side: 'Подтвердить сеанс может только удалённый компьютер',
 };

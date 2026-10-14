@@ -87,6 +87,7 @@ const ConnectTab = ({
     try {
       const res = await api.createSession(clean, mode, perms, password.trim() || undefined);
       setActive(res.session);
+      if (res.session.status === 'active') setScreen({ ...res.session, access_id: clean });
       setMessages([]);
       onChanged();
     } catch (err) {

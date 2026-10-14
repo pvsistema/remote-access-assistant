@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Icon from '@/components/ui/icon';
 import { toast } from '@/hooks/use-toast';
 import type { Device, User } from '@/lib/api';
+import SettingsDialog from './SettingsDialog';
 
 export type TabKey = 'home' | 'devices' | 'connect' | 'files' | 'team' | 'log' | 'server' | 'api';
 
@@ -44,6 +45,7 @@ const ConsoleShell = ({
   children: React.ReactNode;
 }) => {
   const [copied, setCopied] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const visibleTabs = guest ? tabs.filter((t) => GUEST_TABS.includes(t.key)) : tabs;
 
   const copy = (value: string, key: string) => {
@@ -59,6 +61,8 @@ const ConsoleShell = ({
   };
 
   return (
+    <>
+    <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} device={myDevice} />
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-secondary">
       <header className="flex h-[52px] flex-none items-center gap-3 border-b border-border bg-background px-4">
         <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary text-primary-foreground">
@@ -83,6 +87,14 @@ const ConsoleShell = ({
         >
           <Icon name="CircleHelp" size={18} />
         </Link>
+        <button
+          type="button"
+          onClick={() => setSettingsOpen(true)}
+          title="Настройки"
+          className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary hover:text-primary"
+        >
+          <Icon name="Settings" size={18} />
+        </button>
         <button
           type="button"
           onClick={onLogout}
@@ -117,6 +129,14 @@ const ConsoleShell = ({
                 className="text-muted-foreground transition-colors hover:text-primary"
               >
                 <Icon name={copied === 'id' ? 'Check' : 'Copy'} size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(true)}
+                title="Настройки: постоянный пароль, автозагрузка"
+                className="text-muted-foreground transition-colors hover:text-primary"
+              >
+                <Icon name="Settings" size={16} />
               </button>
             </span>
             <span className="mt-0.5 block font-head text-[1.45rem] font-bold leading-tight">
@@ -204,6 +224,7 @@ const ConsoleShell = ({
         <span className="ml-auto font-mono text-[0.76rem]">версия 3.0</span>
       </footer>
     </div>
+    </>
   );
 };
 

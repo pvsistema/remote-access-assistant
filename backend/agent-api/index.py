@@ -60,6 +60,7 @@ GUEST_ACTIONS = {
     'guest_register', 'guest_state', 'create_session', 'update_session',
     'confirm_session', 'my_incoming', 'messages', 'send_message',
     'set_device_password', 'heartbeat', 'set_offline',
+    'set_unattended', 'unattended_status',
 }
 
 CORS = {
@@ -242,7 +243,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         if existing:
             cur.execute(
                 f"UPDATE {SCHEMA}.devices SET name=%s, os=%s, os_version=%s, app_version=%s, local_ip=%s, "
-                f"unattended=%s, is_online=TRUE, last_seen=NOW(), account_id=%s WHERE id=%s "
+                f"unattended=(unattended OR %s), is_online=TRUE, last_seen=NOW(), account_id=%s WHERE id=%s "
                 f"RETURNING id, access_id, name",
                 (name, os_name, os_version, app_version, local_ip, unattended, aid, existing['id']),
             )
@@ -300,7 +301,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         mode = (body.get('mode') or 'control')[:24]
         supplied = (body.get('password') or '').strip()
         cur.execute(
-            f"SELECT id, name, account_id, permanent_password, unattended, guest_token "
+            f"SELECT id, name, account_id, permanent_password, unattended, unattended_password, guest_token "
             f"FROM {SCHEMA}.devices WHERE access_id=%s",
             (access_id,),
         )
@@ -314,7 +315,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             own = dev['guest_token'] == guest_token and dev['guest_token'] != ''
         else:
             own = dev['account_id'] == aid and not dev['guest_token']
-        if not own:
+        # Permanent (unattended) password: access without "Разрешить" on the remote PC.
+        auto = bool(supplied) and _check_pwd(supplied, dev['unattended_password'])
+        if not own and not auto:
             if not dev['permanent_password']:
                 return _resp(403, {'error': 'password_required'})
             if not supplied:
@@ -334,18 +337,22 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         cur.execute(
             f"INSERT INTO {SCHEMA}.sessions (account_id, guest_token, device_id, access_id, session_code, "
             f"one_time_password, status, mode, operator_name, relay_url, expires_at, allow_control, "
-            f"allow_files, allow_clipboard, allow_audio, is_recorded) "
-            f"VALUES (%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+            f"allow_files, allow_clipboard, allow_audio, is_recorded, auto_approved, started_at) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+            + ("NOW()" if auto else "NULL") + ") "
             f"RETURNING id, session_code, one_time_password, expires_at, status, mode, "
-            f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded",
-            (aid, guest_token if guest else '', dev['id'], access_id, code, otp, mode,
+            f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded, auto_approved",
+            (aid, guest_token if guest else '', dev['id'], access_id, code, otp,
+             'active' if auto else 'pending', mode,
              operator or user['full_name'] or user['email'] or 'Гость', relay_url, expires,
              bool(perms.get('control', mode == 'control')), bool(perms.get('files', True)),
              bool(perms.get('clipboard', True)), bool(perms.get('audio', False)),
-             bool(perms.get('record', False))),
+             bool(perms.get('record', False)), auto),
         )
         sess = dict(cur.fetchone())
-        _log(cur, aid, 'session_create', f'Создан сеанс к ID {access_id}', dev['id'], sess['id'], ip)
+        _log(cur, aid, 'session_create',
+             f"{'Вход по постоянному паролю' if auto else 'Создан сеанс'} к ID {access_id}",
+             dev['id'], sess['id'], ip)
         sess['relay_url'] = relay_url
         sess['relay_ticket'] = (
             _relay_ticket(srv['secret'], sess['id'], 'operator', sess['allow_control']) if srv else ''
@@ -634,10 +641,10 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         cur.execute(
             f"SELECT s.id, s.access_id, s.session_code, s.status, s.mode, s.operator_name, "
             f"s.created_at, s.expires_at, s.allow_control, s.allow_files, s.allow_clipboard, "
-            f"s.allow_audio, s.is_recorded, d.device_uid, d.name AS device_name "
+            f"s.allow_audio, s.is_recorded, s.auto_approved, d.device_uid, d.name AS device_name "
             f"FROM {SCHEMA}.sessions s JOIN {SCHEMA}.devices d ON d.id = s.device_id "
             + ("WHERE d.guest_token=%s " if guest else "WHERE d.account_id=%s AND d.guest_token='' ")
-            + f"AND s.status IN ('pending','active') AND s.expires_at > NOW() "
+            + f"AND ((s.status='pending' AND s.expires_at > NOW()) OR s.status='active') "
             f"ORDER BY s.created_at DESC LIMIT 10",
             (guest_token if guest else aid,),
         )
@@ -646,8 +653,9 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
     # The controlled machine confirms an incoming request.
     if action == 'confirm_session':
         cur.execute(
-            f"UPDATE {SCHEMA}.sessions s SET status='active', started_at=NOW() "
-            f"WHERE s.id=%s AND s.status='pending' AND s.expires_at > NOW() "
+            f"UPDATE {SCHEMA}.sessions s SET status='active', started_at=COALESCE(s.started_at, NOW()) "
+            f"WHERE s.id=%s AND (s.status='pending' OR (s.status='active' AND s.auto_approved)) "
+            f"AND s.expires_at > NOW() "
             f"AND s.device_id IN (SELECT id FROM {SCHEMA}.devices WHERE "
             + ("guest_token=%s" if guest else "account_id=%s AND guest_token=''")
             + ") RETURNING s.id, s.device_id, s.access_id",
@@ -677,5 +685,35 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         if not cur.fetchone():
             return _resp(404, {'error': 'device_not_found'})
         return _resp(200, {'ok': True})
+
+    # Owner of THIS device sets/removes its permanent password for unattended access.
+    if action in ('set_unattended', 'unattended_status'):
+        owner_sql = "guest_token=%s" if guest else "account_id=%s AND guest_token=''"
+        owner_val = guest_token if guest else aid
+        if action == 'unattended_status':
+            cur.execute(
+                f"SELECT unattended_password <> '' AS enabled FROM {SCHEMA}.devices "
+                f"WHERE id=%s AND {owner_sql}",
+                (body.get('device_id'), owner_val),
+            )
+            row = cur.fetchone()
+            if not row:
+                return _resp(404, {'error': 'device_not_found'})
+            return _resp(200, {'enabled': bool(row['enabled'])})
+        password = (body.get('password') or '').strip()
+        if password and len(password) < 6:
+            return _resp(400, {'error': 'password_too_short'})
+        cur.execute(
+            f"UPDATE {SCHEMA}.devices SET unattended_password=%s, unattended=%s "
+            f"WHERE id=%s AND {owner_sql} RETURNING id",
+            (_make_pwd(password) if password else '', bool(password), body.get('device_id'), owner_val),
+        )
+        row = cur.fetchone()
+        if not row:
+            return _resp(404, {'error': 'device_not_found'})
+        _log(cur, aid, 'device_unattended',
+             'Задан постоянный пароль доступа' if password else 'Постоянный пароль доступа отключён',
+             row['id'], None, ip)
+        return _resp(200, {'ok': True, 'enabled': bool(password)})
 
     return _resp(400, {'error': 'unknown_action'})

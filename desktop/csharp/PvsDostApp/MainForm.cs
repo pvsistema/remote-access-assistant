@@ -31,9 +31,13 @@ public sealed class MainForm : Form
         HTTOPLEFT = 13, HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
 
     private readonly WebView2 _web = new();
+    private readonly NotifyIcon _tray = new();
+    private readonly bool _startHidden;
+    private bool _exiting;
 
-    public MainForm()
+    public MainForm(bool startHidden = false)
     {
+        _startHidden = startHidden;
         Text = AppName;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
@@ -51,8 +55,59 @@ public sealed class MainForm : Form
         _web.Dock = DockStyle.Fill;
         Controls.Add(_web);
 
+        SetupTray();
+
         Load += async (_, _) => await InitWebViewAsync();
-        FormClosing += (_, _) => { _agent?.Dispose(); _agent = null; };
+        FormClosing += (_, e) =>
+        {
+            // With autostart on, the window hides to the tray so the PC stays
+            // reachable by its permanent password. "Выход" in the tray menu quits.
+            if (!_exiting && e.CloseReason == CloseReason.UserClosing && Autostart.IsEnabled())
+            {
+                e.Cancel = true;
+                Hide();
+                return;
+            }
+            _agent?.Dispose();
+            _agent = null;
+            _tray.Visible = false;
+            _tray.Dispose();
+        };
+    }
+
+    // Started by Windows autostart: keep the window hidden, run in the tray.
+    protected override void SetVisibleCore(bool value)
+    {
+        if (_startHidden && !IsHandleCreated)
+        {
+            CreateHandle();
+            value = false;
+        }
+        base.SetVisibleCore(value);
+    }
+
+    private void SetupTray()
+    {
+        _tray.Text = AppName;
+        _tray.Icon = Icon ?? SystemIcons.Application;
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Открыть", null, (_, _) => ShowFromTray());
+        menu.Items.Add("Выход", null, (_, _) => { _exiting = true; Close(); });
+        _tray.ContextMenuStrip = menu;
+        _tray.DoubleClick += (_, _) => ShowFromTray();
+        _tray.Visible = true;
+    }
+
+    private void ShowFromTray()
+    {
+        Show();
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Activate();
+    }
+
+    private void PostToWeb(string json)
+    {
+        try { _web.CoreWebView2?.PostWebMessageAsJson(json); } catch { /* ignore */ }
     }
 
     // Keep the maximized window inside the working area (so the taskbar stays visible).
@@ -196,6 +251,14 @@ public sealed class MainForm : Form
                 break;
             case "win:close":
                 Close();
+                break;
+            case "app:autostart:get":
+                PostToWeb($"{{\"type\":\"autostart\",\"enabled\":{(Autostart.IsEnabled() ? "true" : "false")}}}");
+                break;
+            case "app:autostart:on":
+            case "app:autostart:off":
+                Autostart.Set(cmd.EndsWith(":on"));
+                PostToWeb($"{{\"type\":\"autostart\",\"enabled\":{(Autostart.IsEnabled() ? "true" : "false")}}}");
                 break;
             case "win:drag":
                 // Start native window move so Aero Snap works.

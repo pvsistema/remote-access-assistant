@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, getToken, isGuest, type Session } from '@/lib/api';
 import { parseServerDate } from '@/lib/dates';
 
@@ -32,6 +32,7 @@ const stopAgent = () => {
 export function useIncomingSession() {
   const [incoming, setIncoming] = useState<Session | null>(null);
   const [sharing, setSharing] = useState<Session | null>(null);
+  const autoStarting = useRef<number | null>(null);
 
   useEffect(() => {
     const tick = async () => {
@@ -42,6 +43,19 @@ export function useIncomingSession() {
           (s) => s.status === 'pending' && parseServerDate(s.expires_at).getTime() > now,
         );
         setIncoming((cur) => (cur && cur.id === pending?.id ? cur : pending ?? null));
+
+        // Operator entered the permanent password — start sharing without asking.
+        const auto = sessions.find((s) => s.status === 'active' && s.auto_approved);
+        if (auto && !sharing && autoStarting.current !== auto.id) {
+          autoStarting.current = auto.id;
+          try {
+            const res = await api.confirmSession(auto.id);
+            startAgent(auto, res.relay_url || '', res.relay_ticket || '');
+            setSharing(auto);
+          } catch {
+            autoStarting.current = null;
+          }
+        }
 
         // Operator ended the session — stop sharing.
         if (sharing) {

@@ -13,7 +13,7 @@ internal static class Program
     private const string AppName = "ПВ-Система Доступ";
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
         // Only one running copy at a time.
         using var mutex = new Mutex(true, "PVSDOST_SingleInstance", out bool createdNew);
@@ -30,7 +30,10 @@ internal static class Program
 
         try
         {
-            Application.Run(new MainForm());
+            // Autostart entry points here; keep the user's choice in sync with the exe path.
+            Autostart.Refresh();
+            bool hidden = Array.Exists(args, a => a.Equals(Autostart.Arg, StringComparison.OrdinalIgnoreCase));
+            Application.Run(new MainForm(hidden));
         }
         catch (Exception ex)
         {

@@ -134,7 +134,7 @@ const Console = () => {
         password,
       );
       // The session stays "pending" until the remote user presses "Разрешить".
-      setScreen({ ...res.session, status: 'pending', access_id: clean });
+      setScreen({ ...res.session, status: res.session.status || 'pending', access_id: clean });
       load();
     } catch (err) {
       const code = (err as Error).message;
