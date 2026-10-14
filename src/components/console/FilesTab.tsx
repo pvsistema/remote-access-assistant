@@ -1,5 +1,6 @@
 import Icon from '@/components/ui/icon';
 import type { Transfer } from '@/lib/api';
+import { parseServerDate } from '@/lib/dates';
 
 const size = (b: number) => {
   if (b < 1024) return `${b} Б`;
@@ -43,7 +44,7 @@ const FilesTab = ({ files }: { files: Transfer[] }) => (
               {f.direction === 'upload' ? 'На удалённый ПК' : 'С удалённого ПК'}
             </span>
             <span className="whitespace-nowrap text-[0.83rem] text-muted-foreground">
-              {new Date(f.created_at.replace(' ', 'T')).toLocaleString('ru-RU', {
+              {parseServerDate(f.created_at).toLocaleString('ru-RU', {
                 day: '2-digit',
                 month: '2-digit',
                 hour: '2-digit',

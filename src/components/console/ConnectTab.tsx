@@ -3,6 +3,7 @@ import Icon from '@/components/ui/icon';
 import { toast } from '@/hooks/use-toast';
 import RemoteScreen from '@/components/console/RemoteScreen';
 import { api, ERRORS, type Device, type Message, type Permissions, type Session } from '@/lib/api';
+import { parseServerDate } from '@/lib/dates';
 
 const modes = [
   { key: 'control', label: 'Полное управление', icon: 'MousePointerClick' },
@@ -348,7 +349,7 @@ const ConnectTab = ({
                     <span className="block font-mono text-[0.95rem] font-semibold">ID {s.access_id}</span>
                     <span className="block text-[0.82rem] text-muted-foreground">
                       {statusLabel[s.status] || s.status} ·{' '}
-                      {new Date(s.created_at.replace(' ', 'T')).toLocaleString('ru-RU', {
+                      {parseServerDate(s.created_at).toLocaleString('ru-RU', {
                         day: '2-digit',
                         month: '2-digit',
                         hour: '2-digit',

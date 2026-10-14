@@ -3,10 +3,11 @@ import Icon from '@/components/ui/icon';
 import { toast } from '@/hooks/use-toast';
 import type { Device, Group } from '@/lib/api';
 import { api } from '@/lib/api';
+import { parseServerDate } from '@/lib/dates';
 
 const fmt = (v: string | null) => {
   if (!v) return '—';
-  const d = new Date(v.replace(' ', 'T'));
+  const d = parseServerDate(v);
   return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 };
 

@@ -1,5 +1,6 @@
 import Icon from '@/components/ui/icon';
 import type { LogItem } from '@/lib/api';
+import { parseServerDate } from '@/lib/dates';
 
 const icons: Record<string, string> = {
   login: 'LogIn',
@@ -32,7 +33,7 @@ const LogTab = ({ logs }: { logs: LogItem[] }) => (
             <span className="flex-1 text-[0.94rem] text-foreground">{l.message}</span>
             <span className="hidden font-mono text-[0.8rem] text-muted-foreground sm:block">{l.ip || '—'}</span>
             <span className="whitespace-nowrap text-[0.83rem] text-muted-foreground">
-              {new Date(l.created_at.replace(' ', 'T')).toLocaleString('ru-RU', {
+              {parseServerDate(l.created_at).toLocaleString('ru-RU', {
                 day: '2-digit',
                 month: '2-digit',
                 hour: '2-digit',

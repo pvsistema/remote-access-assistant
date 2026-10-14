@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, getToken, isGuest, type Session } from '@/lib/api';
+import { parseServerDate } from '@/lib/dates';
 
 type Host = { chrome?: { webview?: { postMessage: (m: unknown) => void } } };
 
@@ -37,7 +38,7 @@ export function useIncomingSession() {
         const { sessions } = await api.myIncoming();
         const now = Date.now();
         const pending = sessions.find(
-          (s) => s.status === 'pending' && new Date(s.expires_at).getTime() > now,
+          (s) => s.status === 'pending' && parseServerDate(s.expires_at).getTime() > now,
         );
         setIncoming((cur) => (cur && cur.id === pending?.id ? cur : pending ?? null));
 
