@@ -111,7 +111,12 @@ const Console = () => {
   useEffect(() => {
     const id = setInterval(() => {
       if (getToken()) api.overview().then(setData).catch(() => undefined);
-    }, 15000);
+      else if (isGuest())
+        api
+          .guestState()
+          .then((st) => setData((cur) => ({ ...cur, sessions: st.sessions })))
+          .catch(() => undefined);
+    }, 4000);
     return () => clearInterval(id);
   }, []);
 

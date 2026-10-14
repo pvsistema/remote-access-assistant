@@ -70,7 +70,9 @@ const ConnectTab = ({
     if (!active || active.status !== 'pending') return;
     const fresh = sessions.find((s) => s.id === active.id);
     if (fresh && fresh.status !== 'pending') {
-      setActive((cur) => (cur ? { ...cur, status: fresh.status } : cur));
+      const next = { ...active, status: fresh.status };
+      setActive(next);
+      if (fresh.status === 'active') setScreen(next);
     }
   }, [sessions, active]);
 

@@ -96,6 +96,7 @@ export type Session = {
   relay_url?: string;
   relay_ticket?: string;
   device_name?: string | null;
+  device_uid?: string;
   allow_control?: boolean;
   allow_files?: boolean;
   allow_clipboard?: boolean;

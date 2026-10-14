@@ -14,7 +14,8 @@ const startAgent = (session: Session, relay = '', ticket = '') => {
   wv.postMessage(
     `agent:start:${JSON.stringify({
       session: session.id,
-      uid: deviceUid(),
+      // Guests have no stored UID: their device UID comes with the session.
+      uid: session.device_uid || deviceUid(),
       files: Boolean(session.allow_files),
       relay,
       ticket,
