@@ -1,0 +1,1 @@
+ALTER TABLE t_p23746347_remote_access_assist.sessions ADD COLUMN relay_account_id integer NULL;

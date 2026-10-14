@@ -331,14 +331,21 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         expires = datetime.utcnow() + timedelta(minutes=15)
         perms = body.get('permissions') or {}
         operator = (body.get('operator_name') or '').strip()[:255] if guest else ''
-        # Both sides must meet on the SAME relay — the one of the remote PC owner.
-        srv = _relay(cur, dev['account_id'])
+        # Both sides must meet on the SAME relay: the remote PC owner's server,
+        # otherwise the operator's own server (works for guest "quick session" PCs).
+        relay_acc = None
+        srv = None if dev['guest_token'] else _relay(cur, dev['account_id'])
+        if srv:
+            relay_acc = dev['account_id']
+        elif not guest:
+            srv = _relay(cur, aid)
+            relay_acc = aid if srv else None
         relay_url = srv['url'] if srv else ''
         cur.execute(
             f"INSERT INTO {SCHEMA}.sessions (account_id, guest_token, device_id, access_id, session_code, "
             f"one_time_password, status, mode, operator_name, relay_url, expires_at, allow_control, "
-            f"allow_files, allow_clipboard, allow_audio, is_recorded, auto_approved, started_at) "
-            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
+            f"allow_files, allow_clipboard, allow_audio, is_recorded, auto_approved, relay_account_id, started_at) "
+            f"VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,"
             + ("NOW()" if auto else "NULL") + ") "
             f"RETURNING id, session_code, one_time_password, expires_at, status, mode, "
             f"allow_control, allow_files, allow_clipboard, allow_audio, is_recorded, auto_approved",
@@ -347,7 +354,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
              operator or user['full_name'] or user['email'] or 'Гость', relay_url, expires,
              bool(perms.get('control', mode == 'control')), bool(perms.get('files', True)),
              bool(perms.get('clipboard', True)), bool(perms.get('audio', False)),
-             bool(perms.get('record', False)), auto),
+             bool(perms.get('record', False)), auto, relay_acc),
         )
         sess = dict(cur.fetchone())
         _log(cur, aid, 'session_create',
@@ -658,7 +665,7 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
             f"AND s.expires_at > NOW() "
             f"AND s.device_id IN (SELECT id FROM {SCHEMA}.devices WHERE "
             + ("guest_token=%s" if guest else "account_id=%s AND guest_token=''")
-            + ") RETURNING s.id, s.device_id, s.access_id",
+            + ") RETURNING s.id, s.device_id, s.access_id, s.relay_account_id",
             (body.get('session_id'), guest_token if guest else aid),
         )
         row = cur.fetchone()
@@ -670,7 +677,8 @@ def handler(event: Dict[str, Any], context) -> Dict[str, Any]:
         return _resp(200, {
             'ok': True,
             'status': 'active',
-            **_relay_info(cur, aid, row['id'], 'agent', True),
+            **(_relay_info(cur, row['relay_account_id'], row['id'], 'agent', True)
+               if row['relay_account_id'] else {'relay_url': '', 'relay_ticket': ''}),
         })
 
     # Owner sets/updates the permanent access password of their device.
